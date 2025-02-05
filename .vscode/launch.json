@@ -1,0 +1,17 @@
+{
+
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Tests",
+            "request": "launch",
+            "preLaunchTask": "Build Tests",
+            "type": "coreclr",            
+            "program": "${workspaceRoot}/src/Shrimp.Workflow.Xml.Tests/bin/Debug/netcoreapp2.2/Shrimp.Workflow.Xml.Tests.dll",
+            "args": [],
+            "cwd": "${workspaceRoot}/Shrimp.Workflow.Xml.Tests",
+            "stopAtEntry": false,
+            "console": "internalConsole"
+        },
+    ]
+}

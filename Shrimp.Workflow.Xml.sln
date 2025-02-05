@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.12.35527.113 d17.12
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Shrimp.Workflow.Xml", "src\Shrimp.Workflow.Xml\Shrimp.Workflow.Xml.fsproj", "{4B3C9E16-B59B-4584-AA40-E1FB51897962}"
+EndProject
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Shrimp.Workflow.Xml.Tests", "tests\Shrimp.Workflow.Xml.Tests\Shrimp.Workflow.Xml.Tests.fsproj", "{E7BFD67C-0CFF-4088-9B2C-C89B7D7FB802}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4B3C9E16-B59B-4584-AA40-E1FB51897962}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4B3C9E16-B59B-4584-AA40-E1FB51897962}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4B3C9E16-B59B-4584-AA40-E1FB51897962}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4B3C9E16-B59B-4584-AA40-E1FB51897962}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E7BFD67C-0CFF-4088-9B2C-C89B7D7FB802}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E7BFD67C-0CFF-4088-9B2C-C89B7D7FB802}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E7BFD67C-0CFF-4088-9B2C-C89B7D7FB802}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E7BFD67C-0CFF-4088-9B2C-C89B7D7FB802}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A27331D7-3531-441B-B6D2-EF1B699A09CF}
+	EndGlobalSection
+EndGlobal

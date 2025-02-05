@@ -1,0 +1,18 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Tests",
+            "command": "dotnet",
+            "group": "build",
+            "args": [
+                "build",
+                "tests/Shrimp.Workflow.Xml.Tests/Shrimp.Workflow.Xml.Tests.fsproj"
+            ],
+            "presentation": {
+                "reveal": "silent"
+            },
+            "problemMatcher": "$msCompile"
+        }
+    ]
+}
