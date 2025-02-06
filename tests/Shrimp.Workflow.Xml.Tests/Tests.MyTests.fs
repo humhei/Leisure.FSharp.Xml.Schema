@@ -7,80 +7,214 @@ open System.Xml.Schema
 open System.Drawing
 open System.Xml.Serialization
 
-type WenZhou =
-    | LuCheng = 0
-    | AoJiang = 1
+module DefaultSerializer = 
 
-type City =
-    | HangZhou = 0
-    | WenZhou  = 1
+    type WenZhou =
+        | LuCheng = 0
+        | AoJiang = 1
 
-[<CLIMutable>]
-type Record = 
-    { Name: string 
-      Age: int 
-      Address: string
-      City: City [] }
-with 
+    type City =
+        | HangZhou = 0
+        | WenZhou  = 1
 
-    static member SampleData =
-        { Name = "Jia"
-          Age = 15
-          Address = "HangZhou"
-          City = [| City.HangZhou; City.WenZhou |] }
+    [<CLIMutable>]
+    type Record = 
+        { Name: string 
+          Age: int 
+          Address: string
+          City: City [] }
+    with 
+
+        static member SampleData =
+            { Name = "Jia"
+              Age = 15
+              Address = "HangZhou"
+              City = [| City.HangZhou; City.WenZhou |] }
+
+[<RequireQualifiedAccess>]
+module GeneralRecord =
+
+    [<CLIMutable>]
+    type ColorMapping_XMLScheme =
+        { OriginColor: KnownColor []
+          TargetColor: KnownColor }
+
+    [<CLIMutable>]
+    type ColorMapping =
+        { OriginKnownColor: KnownColor []
+          TargetKnownColor: KnownColor }
+    with 
+        member x.XMLScheme = 
+            { OriginColor = x.OriginKnownColor 
+              TargetColor = x.TargetKnownColor }
+
+        static member OfScheme(scheme: ColorMapping_XMLScheme) =
+            {
+                OriginKnownColor = scheme.OriginColor
+                TargetKnownColor = scheme.TargetColor
+            }
+
+        interface FsIXmlSerializable<ColorMapping> with
+
+            member x.ReadXml(reader) = 
+                let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>()
+                xsSubmit.DeserializeToValue(reader)
+                |> ColorMapping.OfScheme
+
+            member x.WriteXml(writer) = 
+                let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>()
+                xsSubmit.WriteAttributeString_xsi_xsd(writer)
+                xsSubmit.SerializeValue(writer, x.XMLScheme)
 
 
-[<CLIMutable>]
-type ColorMappingXMLScheme =
-    { OriginColor: string 
-      TargetColor: string }
+        static member SampleData =
+            { OriginKnownColor = [|KnownColor.Black|] 
+              TargetKnownColor = KnownColor.Red }
+        
 
-[<CLIMutable>]
-type ColorMapping =
-    { OriginKnownColor: KnownColor
-      TargetKnownColor: KnownColor }
-with 
-    member x.Scheme = 
-        { OriginColor = x.OriginKnownColor.ToString() 
-          TargetColor = x.TargetKnownColor.ToString() }
+[<RequireQualifiedAccess>]
+module GeneralRecordWithNestedRecord =
 
-    static member OfScheme(scheme: ColorMappingXMLScheme) =
-        {
-            OriginKnownColor = System.Enum.Parse<_> scheme.OriginColor
-            TargetKnownColor = System.Enum.Parse<_> scheme.TargetColor
+
+    type ShapeEnum =
+        | Circle = 0
+        | Rectangle = 1
+
+    [<CLIMutable>]
+    type InnerProps =
+        { 
+            Name: string
         }
 
-    interface IXmlSerializable with
-        member x.GetSchema() = 
-            null
+    [<CLIMutable>]
+    type ColorMapping_XMLScheme =
+        { OriginColor: KnownColor
+          TargetColor: KnownColor
+          InnerProps: InnerProps }
 
-        member x.ReadXml(reader) = 
-            let xsSubmit = FsXmlSerializer<ColorMappingXMLScheme>()
-            let scheme = x.Scheme
-            xsSubmit.DeserialzeToValue_WithRoot(reader, scheme, ColorMapping.OfScheme, x)
+    [<CLIMutable>]
+    type ColorMapping =
+        { OriginKnownColor: KnownColor
+          TargetKnownColor: KnownColor
+          InnerProps: InnerProps }
+    with 
+        member x.XMLScheme = 
+            { OriginColor = x.OriginKnownColor 
+              TargetColor = x.TargetKnownColor
+              InnerProps  = x.InnerProps }
 
-        member x.WriteXml(writer) = 
-            let xsSubmit = FsXmlSerializer<ColorMappingXMLScheme>()
-            xsSubmit.SerializeValue(writer, x.Scheme)
+        static member OfScheme(scheme: ColorMapping_XMLScheme) =
+            {
+                OriginKnownColor = scheme.OriginColor
+                TargetKnownColor = scheme.TargetColor
+                InnerProps        = scheme.InnerProps
+            }
 
-    static member SampleData =
-        { OriginKnownColor = KnownColor.Black 
-          TargetKnownColor = KnownColor.Red }
-        
+        interface IXmlSerializable with
+            member x.GetSchema() = 
+                null
+
+            member x.ReadXml(reader) = 
+                let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>()
+                let scheme = x.XMLScheme
+                xsSubmit.DeserialzeToValue_WithRoot(reader, scheme, ColorMapping.OfScheme, x)
+
+            member x.WriteXml(writer) = 
+                let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>()
+                xsSubmit.WriteAttributeString_xsi_xsd(writer)
+                xsSubmit.SerializeValue(writer, x.XMLScheme)
+
+
+        static member SampleData =
+            { OriginKnownColor = KnownColor.Black 
+              TargetKnownColor = KnownColor.Red
+              InnerProps = {Name = "Circle1"} }
+
+[<RequireQualifiedAccess>]
+module GeneralRecordWithSingletonCase =
+
+
+    type ShapeEnum =
+        | Circle = 0
+        | Rectangle = 1
+
+    [<CLIMutable>]
+    type InnerProps =
+        { 
+            Shape: ShapeEnum
+            Name: string
+        }
+
+    /// Color value Tolerance for comparison
+    type Tolerance =  private ByValue of float
+   
+
+    [<CLIMutable>]
+    type ColorMapping_XMLScheme =
+        { OriginColor: KnownColor
+          TargetColor: KnownColor
+          Tolerance: Tolerance }
+
+    [<CLIMutable>]
+    type ColorMapping =
+        { OriginKnownColor: KnownColor
+          TargetKnownColor: KnownColor
+          Tolerance: Tolerance }
+    with 
+        member x.XMLScheme = 
+            { OriginColor = x.OriginKnownColor 
+              TargetColor = x.TargetKnownColor
+              Tolerance  = x.Tolerance }
+
+        static member OfScheme(scheme: ColorMapping_XMLScheme) =
+            {
+                OriginKnownColor = scheme.OriginColor
+                TargetKnownColor = scheme.TargetColor
+                Tolerance        = scheme.Tolerance
+            }
+
+        interface FsIXmlSerializable with
+
+            member __.ReadXml(reader) = 
+                let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>()
+                xsSubmit.DeserializeToValue(reader, scheme, ColorMapping.OfScheme, x)
+
+            member x.WriteXml(writer) = 
+                let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>()
+                xsSubmit.WriteAttributeString_xsi_xsd(writer)
+                xsSubmit.SerializeValue(writer, x.XMLScheme)
+
+
+        static member SampleData =
+            { OriginKnownColor = KnownColor.Black 
+              TargetKnownColor = KnownColor.Red
+              Tolerance = Tolerance.ByValue 5 }
 
 let pass() = Expect.isTrue true "passed"
 let fail() = Expect.isTrue false "failed"
 let MyTests =
   testList "MyTests" [
-    testCase "MyTest Record" <| fun _ ->
-      let m = new FsXmlSerializer<Record>()
-      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\1.xml", @"C:\Users\Administrator\Desktop\1.xsd", Record.SampleData)
-      let p = m.Deserialize(@"C:\Users\Administrator\Desktop\1.xml")
+    testCase "default Serializer test" <| fun _ ->
+      let m = new FsXmlSerializer<DefaultSerializer.Record>()
+      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\1.xml", @"C:\Users\Administrator\Desktop\1.xsd", DefaultSerializer.Record.SampleData)
+      let p = m.DeserializeFromFile(@"C:\Users\Administrator\Desktop\1.xml")
       pass()
 
-    ftestCase "MyTest IXmlSerializable" <| fun _ ->
-      let m = new FsXmlSerializer<ColorMapping>()
-      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\2.xml", @"C:\Users\Administrator\Desktop\2.xsd", ColorMapping.SampleData)
-      let p = m.Deserialize(@"C:\Users\Administrator\Desktop\2.xml")
+    ftestCase "IXmlSerializable general Record" <| fun _ ->
+      let m = new FsXmlSerializer<GeneralRecord.ColorMapping>()
+      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\2.xml", @"C:\Users\Administrator\Desktop\2.xsd", GeneralRecord.ColorMapping.SampleData)
+      let p = m.DeserializeFromFile(@"C:\Users\Administrator\Desktop\2.xml")
+      pass()
+
+    testCase "IXmlSerializable general Record with nest record" <| fun _ ->
+      let m = new FsXmlSerializer<GeneralRecordWithNestedRecord.ColorMapping>()
+      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\3.xml", @"C:\Users\Administrator\Desktop\3.xsd", GeneralRecordWithNestedRecord.ColorMapping.SampleData)
+      let p = m.DeserializeFromFile(@"C:\Users\Administrator\Desktop\3.xml")
+      pass()
+
+    testCase "IXmlSerializable general Record with singtonCase union" <| fun _ ->
+      let m = new FsXmlSerializer<GeneralRecordWithSingletonCase.ColorMapping>()
+      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\4.xml", @"C:\Users\Administrator\Desktop\4.xsd", GeneralRecordWithSingletonCase.ColorMapping.SampleData)
+      let p = m.DeserializeFromFile(@"C:\Users\Administrator\Desktop\4.xml")
       pass()
   ]

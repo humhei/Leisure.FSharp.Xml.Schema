@@ -16,3 +16,4 @@ let allTests =
 
 [<EntryPoint>]
 let main argv = runTests testConfig allTests
+ 
