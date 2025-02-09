@@ -4,7 +4,9 @@
     <TargetFrameworks>netstandard2.0</TargetFrameworks>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Library.fs" />
+    <Compile Include="Types.fs" />
+    <Compile Include="FsSchemeImporter.fs" />
+    <Compile Include="FsXml.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Fake.IO.FileSystem" Version="5.20.4" />

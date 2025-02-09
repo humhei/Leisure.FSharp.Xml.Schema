@@ -5,11 +5,13 @@
     <TargetFramework>net6.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="OtherTypes.fs" />
     <Compile Include="Tests.MyTests.fs" />
     <Compile Include="Tests.Runner.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Expecto" Version="8.11.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Shrimp.Workflow.Xml\Shrimp.Workflow.Xml.fsproj" />
