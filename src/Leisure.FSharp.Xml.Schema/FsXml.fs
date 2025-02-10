@@ -1,5 +1,5 @@
 ﻿// Learn more about F# at http://fsharp.org
-namespace Shrimp.Workflow.Xml
+namespace Leisure.FSharp.Xml.Schema
 #nowarn "0104"
 #nowarn "3535"
 #nowarn "3536"
@@ -140,8 +140,9 @@ type FsXmlSerializer<'T>(configuration) =
             v.WriteXml(writer, configuration)
             writer.WriteEndElement()
         | _->
-            let xsSubmit = new XmlSerializer(tp);
-            xsSubmit.Serialize(writer, value)
+            writer.WriteStartElement(tp.Name)
+            x.SerializeRecord(writer, value)
+            writer.WriteEndElement()
 
 
     //member private x.WriteXml_FsPickler(xmlPath: string, value: 'T) =
@@ -375,14 +376,14 @@ type FsXmlSerializer<'T>(configuration) =
 
         FsXmlSerializer<_>.SerializeValue(writer, tp, value, configuration)
     
-    member private x.WriteAttributeString_xsi_xsd(writer: XmlWriter) =
+    member private x.WriteW3CAttributeString_xsi_xsd(writer: XmlWriter) =
         writer.WriteAttributeString("xmlns", "xsi", null, W3XMLSchemaInstance)
         writer.WriteAttributeString("xmlns", "xsd", null, W3XMLSchema)
 
     member x.SerializeRecord(writer: XmlWriter, value: 'T) =
         match FSharpType.IsRecord tp with 
         | true ->
-            x.WriteAttributeString_xsi_xsd(writer)
+            x.WriteW3CAttributeString_xsi_xsd(writer)
             for prop in props do 
                 let propValue = prop.GetValue(value)
                 FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.PropertyInfo prop, propValue, configuration)
@@ -397,9 +398,11 @@ type FsXmlSerializer<'T>(configuration) =
         use reader = new FileStream(fileName, FileMode.Open)
         match getReadXmlObjMethod tp with 
         | None ->
-            let serializer = new XmlSerializer(tp)
-            let r = serializer.Deserialize(reader);
-            r :?> 'T
+            let reader = XmlReader.Create(reader)
+            x.DeserializeToRecord(reader)
+            //let serializer = new XmlSerializer(tp)
+            //let r = serializer.Deserialize(reader);
+            //r :?> 'T
 
         | Some method ->
             let reader = XmlReader.Create(reader)

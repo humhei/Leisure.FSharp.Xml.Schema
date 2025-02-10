@@ -7,9 +7,9 @@
             "request": "launch",
             "preLaunchTask": "Build Tests",
             "type": "coreclr",            
-            "program": "${workspaceRoot}/src/Shrimp.Workflow.Xml.Tests/bin/Debug/netcoreapp2.2/Shrimp.Workflow.Xml.Tests.dll",
+            "program": "${workspaceRoot}/src/Leisure.FSharp.Xml.Schema.Tests/bin/Debug/netcoreapp2.2/Leisure.FSharp.Xml.Schema.Tests.dll",
             "args": [],
-            "cwd": "${workspaceRoot}/Shrimp.Workflow.Xml.Tests",
+            "cwd": "${workspaceRoot}/Leisure.FSharp.Xml.Schema.Tests",
             "stopAtEntry": false,
             "console": "internalConsole"
         },

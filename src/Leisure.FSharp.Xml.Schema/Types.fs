@@ -1,5 +1,5 @@
 ﻿// Learn more about F# at http://fsharp.org
-namespace Shrimp.Workflow.Xml
+namespace Leisure.FSharp.Xml.Schema
 #nowarn "0104"
 #nowarn "3535"
 #nowarn "3536"
@@ -62,34 +62,37 @@ with
             match tp.GetInterface(nameof FsIXmlSerializableTypeMapping + "`2") with 
             | null -> None
             | itp ->
-                let fullName = typeof<FsIXmlSerializableTypeMapping>.FullName
-                let genericArguments = itp.GetGenericArguments()
-                let itpMap = tp.GetInterfaceMap(itp)
-                let method_toXml = 
-                    itpMap.TargetMethods
-                    |> Array.find(fun m -> 
-                        m.Name.StartsWith(fullName) && m.Name.EndsWith (".ToXml")
-                    )
+                match x.TypeMapping.TryGetValue(tp) with 
+                | true, v -> Some v
+                | false, _ ->
+                    let fullName = typeof<FsIXmlSerializableTypeMapping>.FullName
+                    let genericArguments = itp.GetGenericArguments()
+                    let itpMap = tp.GetInterfaceMap(itp)
+                    let method_toXml = 
+                        itpMap.TargetMethods
+                        |> Array.find(fun m -> 
+                            m.Name.StartsWith(fullName) && m.Name.EndsWith (".ToXml")
+                        )
 
-                let method_ofXml = 
-                    itpMap.TargetMethods
-                    |> Array.find(fun m -> 
-                        m.Name.StartsWith(fullName) && m.Name.EndsWith (".OfXml")
-                    )
+                    let method_ofXml = 
+                        itpMap.TargetMethods
+                        |> Array.find(fun m -> 
+                            m.Name.StartsWith(fullName) && m.Name.EndsWith (".OfXml")
+                        )
 
-                let tpMapping =
-                    { TargetType = genericArguments.[1]
-                      ToXmlSerializable = (fun tpObj ->
-                        method_toXml.Invoke(tpObj, [||])
+                    let tpMapping =
+                        { TargetType = genericArguments.[1]
+                          ToXmlSerializable = (fun tpObj ->
+                            method_toXml.Invoke(tpObj, [||])
                         
-                      )
-                      OfXmlSerializable = (fun xml ->
-                        method_ofXml.Invoke(null, [|tp; xml|])
-                      )
-                    }
+                          )
+                          OfXmlSerializable = (fun xml ->
+                            method_ofXml.Invoke(null, [|tp; xml|])
+                          )
+                        }
 
-                x.TypeMapping.Add(tp, tpMapping)
-                Some tpMapping
+                    x.TypeMapping.Add(tp, tpMapping)
+                    Some tpMapping
         )
         |> ignore
 

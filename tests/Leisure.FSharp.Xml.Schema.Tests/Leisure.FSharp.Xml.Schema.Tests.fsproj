@@ -5,7 +5,7 @@
     <TargetFramework>net6.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="OtherTypes.fs" />
+    <Compile Include="POCOBase.fs" />
     <Compile Include="Tests.MyTests.fs" />
     <Compile Include="Tests.Runner.fs" />
   </ItemGroup>
@@ -14,7 +14,7 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Shrimp.Workflow.Xml\Shrimp.Workflow.Xml.fsproj" />
+    <ProjectReference Include="..\..\src\Leisure.FSharp.Xml.Schema\Leisure.FSharp.Xml.Schema.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Update="FSharp.Core" Version="5.0.1" />

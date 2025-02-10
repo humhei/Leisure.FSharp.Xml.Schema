@@ -1,5 +1,5 @@
 ﻿// Learn more about F# at http://fsharp.org
-namespace Shrimp.Workflow.Xml
+namespace Leisure.FSharp.Xml.Schema
 #nowarn "0104"
 #nowarn "3535"
 #nowarn "3536"

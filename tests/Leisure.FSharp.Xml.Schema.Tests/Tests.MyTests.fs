@@ -1,6 +1,6 @@
 ﻿module Tests.MyTests
 open Expecto
-open Shrimp.Workflow.Xml
+open Leisure.FSharp.Xml.Schema
 open System.Collections.Concurrent
 open System.Drawing
 open System.Collections
@@ -39,55 +39,15 @@ module GeneralRecord =
         | Card1 = 0
         | Card2 = 1
 
-    [<CLIMutable>]
-    type ColorMapping_XMLScheme =
-        { OriginColor: HashSet<KnownColor>
-          TargetColor: KnownColor
-          IndexedCard: Map<int, Card>
-          ID: int option
-          }
 
-    [<CLIMutable>]
     type ColorMapping =
-        { OriginKnownColor: HashSet<KnownColor>
+        { OriginKnownColor: Set<KnownColor>
           TargetKnownColor: KnownColor
           IndexedCard: Map<int, Card>
           ID: int option  }
     with 
-        member x.XMLScheme = 
-            { OriginColor = x.OriginKnownColor 
-              TargetColor = x.TargetKnownColor
-              IndexedCard = x.IndexedCard
-              ID          = x.ID
-            }
-
-        static member OfScheme(scheme: ColorMapping_XMLScheme) =
-            {
-                OriginKnownColor = scheme.OriginColor
-                TargetKnownColor = scheme.TargetColor
-                IndexedCard      = scheme.IndexedCard
-                ID               = scheme.ID
-            }
-
-        static member ReadXml(reader, config) =
-            let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
-            xsSubmit.DeserializeToRecord(reader)
-            |> ColorMapping.OfScheme
-            
-
-        interface FsIXmlSerializable<ColorMapping> with
-
-            static member ReadXml(tp, reader, config) = ColorMapping.ReadXml(reader, config)
-
-            static member ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
-
-            member x.WriteXml(writer, config) = 
-                let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
-                xsSubmit.SerializeRecord(writer, x.XMLScheme)
-
-
         static member SampleData =
-            { OriginKnownColor = HashSet [KnownColor.Black; KnownColor.Silver] 
+            { OriginKnownColor = Set.ofList [KnownColor.Black; KnownColor.Silver] 
               TargetKnownColor = KnownColor.Red
               IndexedCard = 
                 let dict = ConcurrentDictionary()  
@@ -447,64 +407,135 @@ module GeneralRecordWithCustomMapping =
 let pass() = Expect.isTrue true "passed"
 let fail() = Expect.isTrue false "failed"
 let config = FsXmlSerializerConfiguration.DefaultValue
+System.IO.Directory.CreateDirectory(@"xml")
 
 let MyTests =
+    
   testList "MyTests" [
     testCase "default Serializer test" <| fun _ ->
-      let m = new FsXmlSerializer<DefaultSerializer.Record>(config)
-      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\1.xml", @"C:\Users\Administrator\Desktop\1.xsd", DefaultSerializer.Record.SampleData)
-      let p = m.DeserializeFromFile(@"C:\Users\Administrator\Desktop\1.xml")
-      pass()
+      let fileID = 1
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID 
+
+      let data = DefaultSerializer.Record.SampleData
+
+      let serializer = new FsXmlSerializer<DefaultSerializer.Record>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+     
 
     testCase "IXmlSerializable general Record" <| fun _ ->
-      let m = new FsXmlSerializer<GeneralRecord.ColorMapping>(config)
-      let p = GeneralRecord.ColorMapping.SampleData.IndexedCard :> IEnumerable
-      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\2.xml", @"C:\Users\Administrator\Desktop\2.xsd", GeneralRecord.ColorMapping.SampleData)
-      let p = m.DeserializeFromFile(@"C:\Users\Administrator\Desktop\2.xml")
-      pass()
+      let fileID = 2
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID 
+
+      let data = GeneralRecord.ColorMapping.SampleData
+
+      let serializer = new FsXmlSerializer<GeneralRecord.ColorMapping>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
 
     testCase "IXmlSerializable general Record with nest record" <| fun _ ->
-      let m = new FsXmlSerializer<GeneralRecordWithNestedRecord.ColorMapping>(config)
-      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\3.xml", @"C:\Users\Administrator\Desktop\3.xsd", GeneralRecordWithNestedRecord.ColorMapping.SampleData)
-      let p = m.DeserializeFromFile(@"C:\Users\Administrator\Desktop\3.xml")
-      pass()
+      let fileID = 3
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID 
+
+      let data = GeneralRecordWithNestedRecord.ColorMapping.SampleData
+
+      let serializer = new FsXmlSerializer<GeneralRecordWithNestedRecord.ColorMapping>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
 
     testCase "IXmlSerializable general Record with singtonCase union" <| fun _ ->
-      let m = new FsXmlSerializer<GeneralRecordWithSingletonCase.ColorMapping>(config)
-      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\4.xml", @"C:\Users\Administrator\Desktop\4.xsd", GeneralRecordWithSingletonCase.ColorMapping.SampleData)
-      let p = m.DeserializeFromFile(@"C:\Users\Administrator\Desktop\4.xml")
-      pass()
+      let fileID = 4
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID 
+
+      let data = GeneralRecordWithSingletonCase.ColorMapping.SampleData
+
+      let serializer = new FsXmlSerializer<GeneralRecordWithSingletonCase.ColorMapping>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
 
     
     testCase "IXmlSerializable general Record with tuple" <| fun _ ->
-      let m = new FsXmlSerializer<GeneralRecordWithTuple.ColorMapping>(config)
-      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\5.xml", @"C:\Users\Administrator\Desktop\5.xsd", GeneralRecordWithTuple.ColorMapping.SampleData)
-      let p = m.DeserializeFromFile(@"C:\Users\Administrator\Desktop\5.xml")
-      pass()
+      let fileID = 5
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID 
+
+      let data = GeneralRecordWithTuple.ColorMapping.SampleData
+
+      let serializer = new FsXmlSerializer<GeneralRecordWithTuple.ColorMapping>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
 
     testCase "IXmlSerializable general Record with union" <| fun _ ->
-      let m = new FsXmlSerializer<GeneralRecordWithUnion.ColorMapping>(config)
-      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\6.xml", @"C:\Users\Administrator\Desktop\6.xsd", GeneralRecordWithUnion.ColorMapping.SampleData)
-      let p = m.DeserializeFromFile(@"C:\Users\Administrator\Desktop\6.xml")
-      pass()
+      let fileID = 6
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID 
 
-    testCase "IXmlSerializable general Record with custom mapping" <| fun _ ->
+      let data = GeneralRecordWithUnion.ColorMapping.SampleData
+
+      let serializer = new FsXmlSerializer<GeneralRecordWithUnion.ColorMapping>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
+    ftestCase "IXmlSerializable general Record with custom mapping" <| fun _ ->
+      let fileID = 7
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID 
+      
       let config = 
         FsXmlSerializerConfiguration.DefaultValue.AddTypeMapping<GeneralRecordWithCustomMapping.ToleranceValue, float>(
             toXml = (fun m -> m.Value),
             ofXml = (fun m -> GeneralRecordWithCustomMapping.ToleranceValue m)
         )
 
+      let data = GeneralRecordWithCustomMapping.ColorMapping.SampleData
+
+      let serializer = new FsXmlSerializer<GeneralRecordWithCustomMapping.ColorMapping>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
       let m = new FsXmlSerializer<GeneralRecordWithCustomMapping.ColorMapping>(config)
-      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\7.xml", @"C:\Users\Administrator\Desktop\7.xsd", GeneralRecordWithCustomMapping.ColorMapping.SampleData)
-      let p = m.DeserializeFromFile(@"C:\Users\Administrator\Desktop\7.xml")
+      let cc = m.SerializeToFile(@"xml\7.xml", @"xml\7.xsd", GeneralRecordWithCustomMapping.ColorMapping.SampleData)
+      let p = m.DeserializeFromFile(@"xml\7.xml")
       pass()
 
-    ftestCase "IXmlSerializable general Record with POCOBase FsIXmlSerializable" <| fun _ ->
+    testCase "IXmlSerializable general Record with POCOBase FsIXmlSerializableTypeMapping" <| fun _ ->
+      let fileID = 8
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID
+
+      let data = GeneralRecordWithCustomMapping.ColorMapping.SampleData
       let config = FsXmlSerializerConfiguration.DefaultValue
 
-      let m = new FsXmlSerializer<GeneralRecordWithCustomMapping.ColorMapping>(config)
-      let cc = m.SerializeToFile(@"C:\Users\Administrator\Desktop\8.xml", @"C:\Users\Administrator\Desktop\8.xsd", GeneralRecordWithCustomMapping.ColorMapping.SampleData)
-      let p = m.DeserializeFromFile(@"C:\Users\Administrator\Desktop\8.xml")
-      pass()
+      let serializer = new FsXmlSerializer<GeneralRecordWithCustomMapping.ColorMapping>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
   ]

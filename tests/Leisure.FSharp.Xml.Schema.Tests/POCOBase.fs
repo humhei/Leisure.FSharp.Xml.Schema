@@ -1,6 +1,6 @@
 ﻿
 [<AutoOpenAttribute>]
-module Tests.OtherTypes
+module Tests.POCOBaseTypes
 
 
 open Newtonsoft.Json
@@ -8,7 +8,7 @@ open System
 open System.Reflection
 
 open System.Diagnostics
-open Shrimp.Workflow.Xml
+open Leisure.FSharp.Xml.Schema
 open System.Collections.Concurrent
 
 [<AutoOpen>]
