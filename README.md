@@ -18,15 +18,34 @@ so your can edit your xml structure in editor in type safe mode(e.g by vs code x
 unsupported type will raise error
 
 ## Usage
+### sample code
 ```fsharp
-    /// you can define type mapping here
-    let config = FsXmlSerializerConfiguration.DefaultValue
+      let fileID = 2
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID 
 
-    let m = new FsXmlSerializer<GeneralRecordWithCustomMapping.ColorMapping>(config)
-    let cc = m.SerializeToFile(@"you", GeneralRecordWithCustomMapping.ColorMapping.SampleData)
-    let p = m.DeserializeFromFile(@"C:\Users\Administrator\Desktop\8.xml")
-    pass()
+      let data = GeneralRecord.ColorMapping.SampleData
+
+      let serializer = new FsXmlSerializer<GeneralRecord.ColorMapping>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
 ```
+### typeMapping
+
+#### 1. by FsXmlSerializerConfiguration
+```fsharp
+        FsXmlSerializerConfiguration.DefaultValue.AddTypeMapping<GeneralRecordWithCustomMapping.ToleranceValue, float>(
+            toXml = (fun m -> m.Value),
+            ofXml = (fun m -> GeneralRecordWithCustomMapping.ToleranceValue m)
+        )
+```
+#### 2. implement FsIXmlSerializableTypeMapping interface
+see Leisure.FSharp.Xml.Schema.Tests.POCOBase.fs for detail
+
 
 
 Stable | Prerelease
