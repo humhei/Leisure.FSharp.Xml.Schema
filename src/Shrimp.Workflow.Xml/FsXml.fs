@@ -3,26 +3,18 @@ namespace Shrimp.Workflow.Xml
 #nowarn "0104"
 #nowarn "3535"
 #nowarn "3536"
-open System.Linq.Expressions
 
-open System.Runtime.Serialization
 open System
-open System.Globalization
 
-open System.Collections
 open System.Collections.Generic
 
 open System.Reflection
 
-open MBrace.FsPickler
 open System.Xml.Serialization
-open System
 open System.IO
 open System.Collections.Concurrent
 open Microsoft.FSharp.Reflection
 open System.Xml
-open System.Xml.Schema
-open Fake.IO
 
 
 type private MapSerializer<'k,'v when 'k : comparison>() =
@@ -199,7 +191,7 @@ type FsXmlSerializer<'T>(configuration) =
     //    fun parameters ->
     //        method.Invoke(subPropSerializer, parameters)
 
-    static member private SerializeValue(prop: SCasablePropertyType, propValue: obj, writer: XmlWriter, configuration: FsXmlSerializerConfiguration, ?inCollection) =        
+    static member private SerializeValue(writer: XmlWriter, prop: SCasablePropertyType, propValue: obj,  configuration: FsXmlSerializerConfiguration, ?inCollection) =        
         let prop, propValue = 
             configuration.UpdateSCasablePropertyTypeAndValue_ToXml(prop, propValue)
 
@@ -227,7 +219,7 @@ type FsXmlSerializer<'T>(configuration) =
                 (tpCodes, tupleElements)
                 ||> Array.iteri2(fun i (tpCode, tp) tupleElement ->
                     let name = itemText i
-                    FsXmlSerializer<_>.SerializeValue(SCasablePropertyType.NamedType(name, tp), tupleElement, writer, configuration)
+                    FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.NamedType(name, tp), tupleElement, configuration)
                 )
 
                 writer.WriteFullEndElement()
@@ -244,7 +236,7 @@ type FsXmlSerializer<'T>(configuration) =
             | propValue ->
                 let valueProp = propValue.GetType().GetProperty("Value")
                 let propValue = valueProp.GetValue(propValue)
-                FsXmlSerializer<_>.SerializeValue(SCasablePropertyType.NillableNamedType(prop.Name, tp), propValue, writer, configuration)
+                FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.NillableNamedType(prop.Name, tp), propValue, configuration)
 
         | FsTypeCodeEx.DictionaryType propDictTp -> 
             writer.WriteStartElement(prop.Name)
@@ -267,7 +259,7 @@ type FsXmlSerializer<'T>(configuration) =
             match propValue with 
             | :? System.Collections.IEnumerable as items ->
                 for item in items do 
-                    FsXmlSerializer<_>.SerializeValue(SCasablePropertyType.Type elementTp, item, writer, configuration, inCollection = true)
+                    FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.Type elementTp, item, configuration, inCollection = true)
 
             | _ -> failwithf "%s should be IEnumerable type" propTp.Name
 
@@ -297,10 +289,14 @@ type FsXmlSerializer<'T>(configuration) =
 
             | FsTypeCode.Object objectTpCode ->
                 match propValue with 
-                | :? IXmlSerializable as xmlSerilizable -> xmlSerilizable.WriteXml(writer)
+                | :? FsIXmlSerializable as xmlSerilizable -> xmlSerilizable.WriteXml(writer, configuration)
                 | _ -> 
                     writeProp(fun () ->
                         match objectTpCode with 
+                        | FsObjectTypeCode.FsXmlSerializable  -> 
+                            /// already predicate by previous line (| :? FsIXmlSerializable as xmlSerilizable)
+                            failwithf "Invalid token"
+
                         | FsObjectTypeCode.Record -> 
                             FsXmlSerializer<_>.SerializeRecordStatic(writer, propValue, prop.Nillable, configuration)
 
@@ -310,7 +306,7 @@ type FsXmlSerializer<'T>(configuration) =
                             | [||] -> failwithf "Not implemented"
                             | [|field|] ->
                                 let fieldValue = field.GetValue(propValue)
-                                FsXmlSerializer<_>.SerializeValue(SCasablePropertyType.OneFieldSCase field, fieldValue, writer, configuration)
+                                FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.OneFieldSCase field, fieldValue, configuration)
 
                             | fields ->
                             
@@ -318,7 +314,7 @@ type FsXmlSerializer<'T>(configuration) =
 
                                 for field in fields do
                                     let fieldValue = field.GetValue(propValue)
-                                    FsXmlSerializer<_>.SerializeValue(SCasablePropertyType.PropertyInfo field, fieldValue, writer, configuration)
+                                    FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.PropertyInfo field, fieldValue, configuration)
                                     ()
 
                                 writer.WriteEndElement()
@@ -338,13 +334,13 @@ type FsXmlSerializer<'T>(configuration) =
                                 writer.WriteFullEndElement()
 
                             | [|field, fieldTp|] ->
-                                FsXmlSerializer<_>.SerializeValue(SCasablePropertyType.NamedType(uci.Name, fieldTp.PropertyType), field, writer, configuration)
+                                FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.NamedType(uci.Name, fieldTp.PropertyType), field, configuration)
                                 
                             | zippedFields ->
                                 writer.WriteStartElement(uci.Name)
 
                                 for (field, fieldTp) in zippedFields do
-                                    FsXmlSerializer<_>.SerializeValue(SCasablePropertyType.PropertyInfo(fieldTp), field, writer, configuration)
+                                    FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.PropertyInfo(fieldTp), field, configuration)
 
                                 writer.WriteFullEndElement()
 
@@ -368,27 +364,32 @@ type FsXmlSerializer<'T>(configuration) =
                     | false -> SCasablePropertyType.PropertyInfo prop
                     | true -> SCasablePropertyType.NillableNamedType (prop.Name, prop.PropertyType)
 
-                FsXmlSerializer<_>.SerializeValue(propType, propValue, writer, configuration)
+                FsXmlSerializer<_>.SerializeValue(writer, propType, propValue, configuration)
 
         | false -> failwithf "Not implemented"
 
+    static member SerializeXmlNodeValue(writer: XmlWriter, value: obj, configuration, ?tpName) =
+        let tp = value.GetType()
+        let tpName = defaultArg tpName tp.Name
+        let tp = SCasablePropertyType.CreateNamedType(tpName, tp)
+
+        FsXmlSerializer<_>.SerializeValue(writer, tp, value, configuration)
+    
+    member private x.WriteAttributeString_xsi_xsd(writer: XmlWriter) =
+        writer.WriteAttributeString("xmlns", "xsi", null, W3XMLSchemaInstance)
+        writer.WriteAttributeString("xmlns", "xsd", null, W3XMLSchema)
 
     member x.SerializeRecord(writer: XmlWriter, value: 'T) =
         match FSharpType.IsRecord tp with 
         | true ->
+            x.WriteAttributeString_xsi_xsd(writer)
             for prop in props do 
                 let propValue = prop.GetValue(value)
-                FsXmlSerializer<_>.SerializeValue(SCasablePropertyType.PropertyInfo prop, propValue, writer, configuration)
+                FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.PropertyInfo prop, propValue, configuration)
                 
 
         | false -> failwithf "Not implemented"
 
-    member x.SerializeToFile(xmlPath: string, xsdPath: string, value: 'T) =
-        x.File_WriteXml(xmlPath, value)
-        //x.File_WriteCsXsd(xsdPath)
-        x.File_WriteFsXsd(xsdPath)
-        x.File_TrimXsdSchemeEnd(xsdPath)
-        x.File_WriteXml_NamespaceSchemaLocation(xmlPath, xsdPath)
 
 
     member x.DeserializeFromFile(fileName: string) =
@@ -402,7 +403,7 @@ type FsXmlSerializer<'T>(configuration) =
 
         | Some method ->
             let reader = XmlReader.Create(reader)
-            let r = method.Invoke(null, [|reader; configuration|])
+            let r = method.Invoke(null, [|tp; reader; configuration|])
             r :?> 'T
 
 
@@ -556,11 +557,15 @@ type FsXmlSerializer<'T>(configuration) =
                     | FsTypeCode.Object tpCode -> 
                         match getReadXmlObjMethod propTp with 
                         | Some methodInfo ->
-                            let r = methodInfo.Invoke(null, [|reader|])
+                            let r = methodInfo.Invoke(null, [|propTp; reader; configuration|])
                             r
 
                         | None -> 
                             match tpCode with 
+                            | FsObjectTypeCode.FsXmlSerializable  -> 
+                                /// already predicate by previous line (match getReadXmlObjMethod propTp with)
+                                failwithf "Invalid token"
+
                             | FsObjectTypeCode.Record ->
                                 FsXmlSerializer<_>.DeserializeToRecordStatic(reader, propTp, configuration)
                             
@@ -666,6 +671,12 @@ type FsXmlSerializer<'T>(configuration) =
             | _ -> propMappingOp.TypeMapping.OfXmlSerializable value
                     
 
+    static member DeserializeXmlNodeValueTo(reader: XmlReader, tp: Type, configuration, ?tpName) =
+        let tpName = defaultArg tpName tp.Name
+        let tp = SCasablePropertyType.CreateNamedType(tpName, tp)
+
+        FsXmlSerializer<_>.DeserializeToProp(reader, tp, configuration)
+
     static member DeserializeToRecordStatic(reader: XmlReader, tp: Type, configuration) =
             
         let props = FSharpType.GetRecordFields tp
@@ -725,6 +736,10 @@ type FsXmlSerializer<'T>(configuration) =
         FSharpValue.MakeRecord(tp, List.toArray props)
         |> unbox<'T>
 
-    member x.WriteAttributeString_xsi_xsd(writer: XmlWriter) =
-        writer.WriteAttributeString("xmlns", "xsi", null, W3XMLSchemaInstance)
-        writer.WriteAttributeString("xmlns", "xsd", null, W3XMLSchema)
+
+    member x.SerializeToFile(xmlPath: string, xsdPath: string, value: 'T) =
+        x.File_WriteFsXsd(xsdPath)
+        x.File_WriteXml(xmlPath, value)
+        //x.File_WriteCsXsd(xsdPath)
+        x.File_TrimXsdSchemeEnd(xsdPath)
+        x.File_WriteXml_NamespaceSchemaLocation(xmlPath, xsdPath)

@@ -3,26 +3,17 @@ namespace Shrimp.Workflow.Xml
 #nowarn "0104"
 #nowarn "3535"
 #nowarn "3536"
-open System.Linq.Expressions
 
-open System.Runtime.Serialization
 open System
-open System.Globalization
 
-open System.Collections
 open System.Collections.Generic
 
-open System.Reflection
 
-open MBrace.FsPickler
-open System.Xml.Serialization
-open System
-open System.IO
 open System.Collections.Concurrent
 open Microsoft.FSharp.Reflection
 open System.Xml
 open System.Xml.Schema
-open Fake.IO
+
 
 
 type private IndexedXmlSchemaType =
@@ -99,6 +90,7 @@ type FsSchemeImporter(configuration: FsXmlSerializerConfiguration) =
 
         let typeElements = TypeElementsCache()
         let rec loop isOption (tp: Type) =
+            configuration.AddTypeMappingByType(tp)
             let tp = configuration.UpdateType_ToXml_Ex(tp) 
 
             let tpCode = getFsTpCodeEx (tp)
@@ -288,6 +280,11 @@ type FsSchemeImporter(configuration: FsXmlSerializerConfiguration) =
 
                     
                     match fsObjectTypeCode with 
+                    | FsObjectTypeCode.FsXmlSerializable ->
+                        failwithf "Invalid token, using FsXmlSerializableTypeMapping instead"
+                        ()
+
+
                     | FsObjectTypeCode.Record ->
 
                         let props = 
@@ -382,6 +379,9 @@ type FsSchemeImporter(configuration: FsXmlSerializerConfiguration) =
                                         let innerType = 
                                             let fields = case.GetFields()
                                             let tpName = tp.Name + "_" + case.Name.ToLower() + "Case"
+                                            for field in fields do
+                                                configuration.AddTypeMappingByType field.PropertyType
+
                                             match fields with 
                                             | [||] -> 
                                                 XmlQualifiedName("string", W3XMLSchema)
@@ -460,7 +460,6 @@ type FsSchemeImporter(configuration: FsXmlSerializerConfiguration) =
                                 | false -> loop false propTp
 
 
-                    | _ -> failwith "Not implemented"
 
         loop false tp
 

@@ -10,7 +10,6 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Fake.IO.FileSystem" Version="5.20.4" />
-    <PackageReference Include="FsPickler" Version="5.3.2" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Update="FSharp.Core" Version="5.0.1" />

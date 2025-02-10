@@ -3,9 +3,7 @@ namespace Shrimp.Workflow.Xml
 #nowarn "0104"
 #nowarn "3535"
 #nowarn "3536"
-open System.Linq.Expressions
 
-open System.Runtime.Serialization
 open System
 open System.Globalization
 
@@ -14,19 +12,135 @@ open System.Collections.Generic
 
 open System.Reflection
 
-open MBrace.FsPickler
-open System.Xml.Serialization
-open System
-open System.IO
 open System.Collections.Concurrent
 open Microsoft.FSharp.Reflection
 open System.Xml
 open System.Xml.Schema
-open Fake.IO
+
+type FsIXmlSerializableTypeMapping = interface end
+
+type FsIXmlSerializableTypeMapping<'T, 'XmlT> =
+    inherit FsIXmlSerializableTypeMapping
+    static abstract member OfXml: Type * 'XmlT -> 'T
+    abstract member ToXml: unit -> 'XmlT
 
 
 
+type FsXmlSerializerTypeMapping =
+    { ToXmlSerializable: obj -> obj 
+      OfXmlSerializable: obj -> obj
+      TargetType: Type}
 
+
+[<AutoOpen>]
+module private _FsXmlSerializerConfigurationUtils = 
+    let fsIXmlSerializableTypeMappingCache = ConcurrentDictionary()
+
+type FsXmlSerializerConfiguration =
+    { TypeMapping: Dictionary<Type, FsXmlSerializerTypeMapping> }
+with 
+    member x.AddTypeMapping<'Origin, 'Target>(toXml: 'Origin -> 'Target, ofXml: 'Target -> 'Origin) =
+        let typeMapping = 
+            let toXml (v: obj) =
+                toXml (v :?> 'Origin)
+                |> box
+
+            let ofXml(v: obj) =
+                ofXml(v :?> 'Target)
+                |> box
+
+            { ToXmlSerializable = toXml 
+              OfXmlSerializable = ofXml
+              TargetType = typeof<'Target>}
+
+        x.TypeMapping.Add(typeof<'Origin>, typeMapping)
+        x
+
+    member private x.AddTypeMappingByTypeEntity(tp: Type) =
+        
+        fsIXmlSerializableTypeMappingCache.GetOrAdd(tp, valueFactory = fun _ ->
+            match tp.GetInterface(nameof FsIXmlSerializableTypeMapping + "`2") with 
+            | null -> None
+            | itp ->
+                let fullName = typeof<FsIXmlSerializableTypeMapping>.FullName
+                let genericArguments = itp.GetGenericArguments()
+                let itpMap = tp.GetInterfaceMap(itp)
+                let method_toXml = 
+                    itpMap.TargetMethods
+                    |> Array.find(fun m -> 
+                        m.Name.StartsWith(fullName) && m.Name.EndsWith (".ToXml")
+                    )
+
+                let method_ofXml = 
+                    itpMap.TargetMethods
+                    |> Array.find(fun m -> 
+                        m.Name.StartsWith(fullName) && m.Name.EndsWith (".OfXml")
+                    )
+
+                let tpMapping =
+                    { TargetType = genericArguments.[1]
+                      ToXmlSerializable = (fun tpObj ->
+                        method_toXml.Invoke(tpObj, [||])
+                        
+                      )
+                      OfXmlSerializable = (fun xml ->
+                        method_ofXml.Invoke(null, [|tp; xml|])
+                      )
+                    }
+
+                x.TypeMapping.Add(tp, tpMapping)
+                Some tpMapping
+        )
+        |> ignore
+
+    member x.AddTypeMappingByType(tp: Type) =
+        match tp.IsGenericType with 
+        | true -> 
+            tp.GetGenericArguments()
+            |> Array.iter(fun tp -> x.AddTypeMappingByType(tp))
+
+        | false -> 
+            x.AddTypeMappingByTypeEntity(tp)
+
+    static member DefaultValue =
+        { TypeMapping = Dictionary() }
+
+    member internal x.UpdateTypeAndValue_ToXml(tp: Type, value: obj) =
+        match x.TypeMapping.TryGetValue tp with 
+        | false, _ -> None
+        | true, typeMapping ->
+            let newValue = 
+                typeMapping.ToXmlSerializable(value)
+
+            (typeMapping.TargetType, newValue)
+            |> Some
+
+    //member internal x.OF_XML_UpdateType(tp: Type) =
+    //    match x.InverseTypeMapping.TryGetValue tp with 
+    //    | false, _ -> None
+    //    | true, typeMapping ->
+    //        Some typeMapping.TargetType
+
+
+
+[<Interface>]
+type FsIXmlSerializable = 
+    abstract member WriteXml: writer: XmlWriter * config: FsXmlSerializerConfiguration -> unit
+    static abstract ReadXmlObj: tp: Type * reader: XmlReader * config: FsXmlSerializerConfiguration -> obj
+    
+type FsIXmlSerializable<'T> =
+    inherit FsIXmlSerializable
+    static abstract member ReadXml: tp: Type * reader:XmlReader * config: FsXmlSerializerConfiguration -> 'T
+
+
+//type FsIXmlSerializableSchema =
+//    inherit FsIXmlSerializable
+    
+//    static abstract member SchemaType: unit -> Type
+
+//type FsIXmlSerializableSchema<'T> =
+//    inherit FsIXmlSerializableSchema
+//    static abstract member ReadXml: tp: Type * reader:XmlReader * config: FsXmlSerializerConfiguration -> 'T
 
 
 
@@ -109,6 +223,7 @@ module private _Utils =
         | Record 
         | Union of UnionCaseInfo []
         | SingletonCaseUnion of UnionCaseInfo
+        | FsXmlSerializable
 
     [<RequireQualifiedAccess>]
     type FsTypeCode =
@@ -154,7 +269,12 @@ module private _Utils =
 
                             | _ -> failwithf "[Xml serializable] Un supported type %A" tp
 
-                        | false -> failwithf "[Xml serializable] Un supported type %A" tp
+                        | false -> 
+                            match tp.GetInterface(nameof FsIXmlSerializable) with 
+                            | null -> failwithf "[Xml serializable] Un supported type %A, using FsXmlSerializableSchema instead" tp
+
+                            | itp ->
+                                FsTypeCode.Object(FsObjectTypeCode.FsXmlSerializable)
                 
             | _ -> 
                 match tp.IsEnum with
@@ -535,6 +655,30 @@ module private _Utils =
 
 
     type FsTypeCodeEx with 
+        member private x.ValueTypeCodeToXmlTypeName(tpCode: TypeCode) =
+            let tpName = 
+                match tpCode with 
+                | TypeCode.Char 
+                | TypeCode.DBNull 
+                | TypeCode.String -> "string"
+                | TypeCode.Single 
+                | TypeCode.Double 
+                | TypeCode.Decimal -> "decimal"
+                | TypeCode.Boolean -> "boolean"
+                | TypeCode.DateTime -> "date"
+                | TypeCode.Byte
+                | TypeCode.SByte 
+                | TypeCode.UInt16 
+                | TypeCode.UInt32
+                | TypeCode.UInt64
+                | TypeCode.Int16
+                | TypeCode.Int32
+                | TypeCode.Int64 -> "int"
+                | TypeCode.Empty -> "string"
+                | TypeCode.Object -> failwith "Invalid token"
+
+            tpName
+
         member x.GetXmlQualifiedName(tp: Type): XmlQualifiedName =
 
             let getName_InLoop(tp: Type) =
@@ -558,27 +702,7 @@ module private _Utils =
                 | FsTypeCode.Object _
                 | FsTypeCode.Enum -> XmlQualifiedName(tp.Name)
                 | FsTypeCode.ValueType tpCode ->
-                    let tpName = 
-                        match tpCode with 
-                        | TypeCode.Char 
-                        | TypeCode.DBNull 
-                        | TypeCode.String -> "string"
-                        | TypeCode.Single 
-                        | TypeCode.Double 
-                        | TypeCode.Decimal -> "decimal"
-                        | TypeCode.Boolean -> "boolean"
-                        | TypeCode.DateTime -> "date"
-                        | TypeCode.Byte
-                        | TypeCode.SByte 
-                        | TypeCode.UInt16 
-                        | TypeCode.UInt32
-                        | TypeCode.UInt64
-                        | TypeCode.Int16
-                        | TypeCode.Int32
-                        | TypeCode.Int64 -> "int"
-                        | TypeCode.Empty -> "string"
-                        | TypeCode.Object -> failwith "Invalid token"
-
+                    let tpName = x.ValueTypeCodeToXmlTypeName(tpCode)
                     XmlQualifiedName(tpName, W3XMLSchema)
 
             | FsTypeCodeEx.Tuple tupleTypes ->
@@ -612,7 +736,9 @@ module private _Utils =
                 match fsTypeCode with
                 | FsTypeCode.Object _
                 | FsTypeCode.Enum -> tp.Name
-                | FsTypeCode.ValueType tpCode -> tpCode.ToString()
+                | FsTypeCode.ValueType tpCode -> 
+                    x.ValueTypeCodeToXmlTypeName(tpCode)
+                    |> toTitleCase
 
 
             | FsTypeCodeEx.Tuple tupleTypes ->
@@ -750,63 +876,6 @@ module private _Utils =
                 )
 
 
-type FsXmlSerializerTypeMapping =
-    { ToXmlSerializable: obj -> obj 
-      OfXmlSerializable: obj -> obj
-      TargetType: Type}
-
-type FsXmlSerializerConfiguration =
-    { TypeMapping: Dictionary<Type, FsXmlSerializerTypeMapping>
-      InverseTypeMapping: Dictionary<Type, FsXmlSerializerTypeMapping> }
-with 
-    member x.AddTypeMapping<'Origin, 'Target>(toXml: 'Origin -> 'Target, ofXml: 'Target -> 'Origin) =
-        let typeMapping = 
-            let toXml (v: obj) =
-                toXml (v :?> 'Origin)
-                |> box
-
-            let ofXml(v: obj) =
-                ofXml(v :?> 'Target)
-                |> box
-
-            { ToXmlSerializable = toXml 
-              OfXmlSerializable = ofXml
-              TargetType = typeof<'Target>}
-
-        x.TypeMapping.Add(typeof<'Origin>, typeMapping)
-        x.InverseTypeMapping.Add(typeof<'Target>, { typeMapping with TargetType = typeof<'Origin>})
-        x
-
-    static member DefaultValue =
-        { TypeMapping = Dictionary()
-          InverseTypeMapping = Dictionary() }
-
-    member internal x.UpdateTypeAndValue_ToXml(tp: Type, value: obj) =
-        match x.TypeMapping.TryGetValue tp with 
-        | false, _ -> None
-        | true, typeMapping ->
-            let newValue = 
-                typeMapping.ToXmlSerializable(value)
-
-            (typeMapping.TargetType, newValue)
-            |> Some
-
-    //member internal x.OF_XML_UpdateType(tp: Type) =
-    //    match x.InverseTypeMapping.TryGetValue tp with 
-    //    | false, _ -> None
-    //    | true, typeMapping ->
-    //        Some typeMapping.TargetType
-
-
-
-[<Interface>]
-type FsIXmlSerializable = 
-    abstract member WriteXml: writer: XmlWriter * config: FsXmlSerializerConfiguration -> unit
-    static abstract ReadXmlObj: XmlReader * config: FsXmlSerializerConfiguration -> obj
-    
-type FsIXmlSerializable<'T> =
-    inherit FsIXmlSerializable
-    static abstract member ReadXml: XmlReader * config: FsXmlSerializerConfiguration -> 'T
 
 
 [<AutoOpen>]
@@ -816,17 +885,41 @@ module private _Util2 =
 
     let getReadXmlObjMethod(tp: Type) =
         getReadXmlObjMethodCache.GetOrAdd(tp, valueFactory = fun _ ->
+            let fullName = typeof<FsIXmlSerializable>.FullName
             let fsIXmlSerializable = tp.GetInterface(nameof FsIXmlSerializable)
             match fsIXmlSerializable with 
             | null -> None
-            | _ ->
+            | itp ->
+                let itpMap = tp.GetInterfaceMap(itp)
+
                 let method = 
-                    let name = typeof<FsIXmlSerializable>.FullName + ".ReadXmlObj"
-                    tp.GetMethod(name)
+                    itpMap.TargetMethods
+                    |> Array.find(fun m -> m.Name = fullName + "." + nameof FsIXmlSerializable.ReadXmlObj)
 
                 Some method
 
         )
+
+    //let private getReadSchemaTypeMethodCache = ConcurrentDictionary()
+
+    //let getSchemaType(tp: Type) =
+    //    getReadSchemaTypeMethodCache.GetOrAdd(tp, valueFactory = fun _ ->
+    //        let fullName = typeof<FsIXmlSerializable>.FullName
+    //        let fsIXmlSerializable = tp.GetInterface(nameof FsIXmlSerializable)
+    //        match fsIXmlSerializable with 
+    //        | null -> None
+    //        | itp ->
+    //            let itpMap = tp.GetInterfaceMap(itp)
+
+    //            let method = 
+    //                itpMap.TargetMethods
+    //                |> Array.find(fun m -> m.Name = fullName + "." + nameof FsIXmlSerializableSchema.SchemaType)
+
+    //            let property = method.Invoke(null, [||])
+
+    //            Some property
+
+    //    )
 
     let private updateSCasablePropertyType_Cache = ConcurrentDictionary()
 
