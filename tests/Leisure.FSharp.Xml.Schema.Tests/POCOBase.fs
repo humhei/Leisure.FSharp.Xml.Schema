@@ -33,11 +33,21 @@ type POCOBase<'T when 'T : equality and 'T : comparison> (pocoKey: 'T) =
 
     static member private GetCtr(tp: Type) =
         pocoBaseCtrCache.GetOrAdd(tp, valueFactory = fun _ ->
-            match tp.GetConstructor(BindingFlags.Instance ||| BindingFlags.Public, [|typeof<'T>|]) with 
+            match tp.GetConstructor([|typeof<'T>|]) with 
             | null ->   
-                match tp.GetConstructor(BindingFlags.Instance ||| BindingFlags.NonPublic, [|typeof<'T>|]) with 
-                | null -> failwithf "[XMLSerialization] Constructor with param tp %s not exists" (typeof<'T>.FullName)
-                | ctr -> ctr
+                match tp.GetConstructors(BindingFlags.Instance ||| BindingFlags.NonPublic) with 
+                | null -> failwithf "[FsXMLSerialization] Constructor with param tp %s not exists" (typeof<'T>.FullName)
+                | ctrs -> 
+                    ctrs
+                    |> Array.tryFind(fun m -> 
+                        match m.GetParameters() with 
+                        | [|parameter|] -> 
+                            parameter.ParameterType = typeof<'T>
+                        | _ -> false
+                    )
+                    |> function
+                        | None -> failwithf "[FsXMLSerialization] Constructor with param tp %s not exists" (typeof<'T>.FullName)
+                        | Some ctr -> ctr
 
             | ctr -> ctr
         )
@@ -65,13 +75,14 @@ type POCOBase<'T when 'T : equality and 'T : comparison> (pocoKey: 'T) =
 
 
     interface FsIXmlSerializableTypeMapping<POCOBase<'T>, 'T> with
-        static member OfXml(tp: Type, v): POCOBase<'T> = 
+        member __.OfXml(tp: Type, v): POCOBase<'T> = 
             let ctr = POCOBase<'T>.GetCtr(tp)
             ctr.Invoke([|v|])
             |> unbox<_>
 
         member x.ToXml() = pocoKey
             
+        member x.WrapOldName = true
 
     interface System.IComparable with 
         member x.CompareTo(y: obj) =

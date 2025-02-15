@@ -49,10 +49,15 @@ type private TypeElementsCache() =
 
     member x.Keys = cache.Keys
 
-type Entry<'Key, 'Value> =
-    { Key: 'Key 
-      Value: 'Value }
 
+
+module _Entry = 
+
+    type Entry<'Key, 'Value> =
+        { Key: 'Key 
+          Value: 'Value }
+
+open _Entry
 
 [<RequireQualifiedAccess>]
 module private Entry =
@@ -87,11 +92,57 @@ type FsSchemeImporter(configuration: FsXmlSerializerConfiguration) =
             
             propSequence
 
+        let createXmlSchemaSequence_WithTypeMapping(props: SCasablePropertyTypeWithTypeMapping []) =
+            let propSequence = 
+                XmlSchemaSequence()
+
+            for prop in props do
+                let element = prop.GenerateElement()
+                propSequence.Items.Add(element)
+                |> ignore
+            
+            propSequence
+
 
         let typeElements = TypeElementsCache()
         let rec loop isOption (tp: Type) =
             configuration.AddTypeMappingByType(tp)
-            let tp = configuration.UpdateType_ToXml_Ex(tp) 
+            let tpMapping = configuration.TryGetTypeMapping tp
+
+            let tryWrapOldName_TypeMapping(f) =
+                match tpMapping with 
+                | None -> f()
+                | Some tpMapping ->
+                    match tpMapping.TypeMapping.WrapOldName with 
+                    | false -> f()
+                    | true ->
+                        let schemaType: XmlSchemaComplexType = f()
+                        schemaType.Name <- null
+                        let element = 
+                            XmlSchemaElement(
+                                Name = tpMapping.OriginType.Name,
+                                SchemaType = schemaType
+                            )
+
+                        let propSequence = 
+                            let sequence = XmlSchemaSequence()
+                            sequence.Items.Add(element) |> ignore
+                            sequence
+
+                        XmlSchemaComplexType(
+                            Name = tpMapping.OriginType.Name,
+                            Particle = propSequence
+                        )
+
+
+            let tp = 
+                match tpMapping with 
+                | None ->  
+                    configuration.UpdateType_ToXml_Ex__NoUpdateForWrappedTypeName(tp)
+                    |> fst
+
+                | Some tpMapping ->
+                    tpMapping.TypeMapping.TargetType
 
             let tpCode = getFsTpCodeEx (tp)
             let getTuplePropSequence(tpCodes: array<FsTypeCodeEx * Type>) =
@@ -106,29 +157,31 @@ type FsSchemeImporter(configuration: FsXmlSerializerConfiguration) =
 
             | FsTypeCodeEx.Tuple (tpCodes) ->
                 typeElements.GetOrAdd(tp, valueFactory = fun _ -> 
-                    let innerType = 
-                        let propSequence = getTuplePropSequence(tpCodes)
+                    tryWrapOldName_TypeMapping(fun () ->
+                        let innerType = 
+                            let propSequence = getTuplePropSequence(tpCodes)
+
+                            XmlSchemaComplexType(
+                                Particle = propSequence
+                            )
+                        
+                        let element = 
+                            XmlSchemaElement(
+                                Name = "Tuple" + tpCodes.Length.ToString(),
+                                SchemaType = innerType
+                            )
+
+                        let propSequence = 
+                            let sequence = XmlSchemaSequence()
+                            sequence.Items.Add(element) |> ignore
+                            sequence
 
                         XmlSchemaComplexType(
+                            Name = tp.GetXmlQualifiedName().Name,
                             Particle = propSequence
                         )
-                        
-                    
-                    let element = 
-                        XmlSchemaElement(
-                            Name = "Tuple" + tpCodes.Length.ToString(),
-                            SchemaType = innerType
-                        )
-
-                    let propSequence = 
-                        let sequence = XmlSchemaSequence()
-                        sequence.Items.Add(element) |> ignore
-                        sequence
-
-                    XmlSchemaComplexType(
-                        Name = tp.GetXmlQualifiedName().Name,
-                        Particle = propSequence
                     )
+
                 )
                 |> ignore
 
@@ -194,12 +247,16 @@ type FsSchemeImporter(configuration: FsXmlSerializerConfiguration) =
                 
             | FsTypeCodeEx.CollectionType collectionType -> 
                 let elementType = collectionType.ElementType
+
+
                 typeElements.GetOrAdd(tp, valueFactory = fun _ ->
                     let arrayTpName = collectionType.TypeName
                     let propSequence = 
                         XmlSchemaSequence()
 
                     let elementTypeName = 
+
+
                         match getFsTpCodeEx elementType with 
                         | FsTypeCodeEx.Tuple tpCodes ->
                             let propSequence = getTuplePropSequence(tpCodes)
@@ -280,7 +337,7 @@ type FsSchemeImporter(configuration: FsXmlSerializerConfiguration) =
 
                     
                     match fsObjectTypeCode with 
-                    | FsObjectTypeCode.FsXmlSerializable ->
+                    | FsObjectTypeCode.FsXmlSerializableTypeMapping ->
                         failwithf "Invalid token, using FsXmlSerializableTypeMapping instead"
                         ()
 
@@ -378,6 +435,7 @@ type FsSchemeImporter(configuration: FsXmlSerializerConfiguration) =
                                     |> Array.map(fun case ->
                                         let innerType = 
                                             let fields = case.GetFields()
+                                            let caseName = case.Name
                                             let tpName = tp.Name + "_" + case.Name.ToLower() + "Case"
                                             for field in fields do
                                                 configuration.AddTypeMappingByType field.PropertyType
@@ -388,12 +446,13 @@ type FsSchemeImporter(configuration: FsXmlSerializerConfiguration) =
                                                 |> Choice1Of3
                                             | [|field|] -> 
                                                 let propType =
-                                                    SCasablePropertyType.CreateNamedType(
+                                                    SCasablePropertyTypeWithTypeMapping.CreateNamedType(
                                                         case.Name,
-                                                        configuration.UpdateType_ToXml_Ex field.PropertyType
+                                                        field.PropertyType,
+                                                        configuration
                                                     )
-                                                
-                                                propType
+
+                                                (propType)
                                                 |> Choice2Of3
 
                                             | fields ->
@@ -401,10 +460,13 @@ type FsSchemeImporter(configuration: FsXmlSerializerConfiguration) =
                                                     let propTypes = 
                                                         fields
                                                         |> Array.map(fun m -> 
-                                                            SCasablePropertyType.PropertyInfo m
+                                                            SCasablePropertyTypeWithTypeMapping.CreateNamedType(
+                                                                m.Name,
+                                                                m.PropertyType,
+                                                                configuration
+                                                            )
                                                         )
-                                                        |> Array.map configuration.UpdateSCasablePropertyType_ToXml
-                                                    createXmlSchemaSequence propTypes
+                                                    createXmlSchemaSequence_WithTypeMapping propTypes
                                             
                                                 XmlSchemaComplexType(
                                                     Particle = propSequence
@@ -419,8 +481,9 @@ type FsSchemeImporter(configuration: FsXmlSerializerConfiguration) =
                                                 SchemaTypeName = name
                                             )
 
-                                        | Choice2Of3 propInfo ->
-                                            propInfo.GenerateElement()
+                                        | Choice2Of3 (propInfo) ->
+                                            let element = propInfo.GenerateElement()
+                                            element
 
                                         | Choice3Of3 innerType ->
                                             XmlSchemaElement(

@@ -1,6 +1,8 @@
 ﻿// Learn more about F# at http://fsharp.org
 namespace Leisure.FSharp.Xml.Schema
 #nowarn "0104"
+open System.Runtime.Serialization
+
 #nowarn "3535"
 #nowarn "3536"
 
@@ -17,29 +19,42 @@ open Microsoft.FSharp.Reflection
 open System.Xml
 open System.Xml.Schema
 
-type FsIXmlSerializableTypeMapping = interface end
+type FsIXmlSerializableTypeMapping = 
+    abstract member WrapOldName: bool
 
 type FsIXmlSerializableTypeMapping<'T, 'XmlT> =
     inherit FsIXmlSerializableTypeMapping
-    static abstract member OfXml: Type * 'XmlT -> 'T
+    /// NOTE: static abstract for compitiple to .net standard 2.0
+    abstract member OfXml: Type * 'XmlT -> 'T
     abstract member ToXml: unit -> 'XmlT
 
 
+[<AutoOpen>]
+module private _Type_Extensions =
+    type Type with 
+        member x.GetInterface_Last(name: string) =
+            x.GetInterfaces()
+            |> Array.tryFindBack(fun m ->
+                m.Name.ToLower() = name.ToLower()
+            )
 
 type FsXmlSerializerTypeMapping =
     { ToXmlSerializable: obj -> obj 
       OfXmlSerializable: obj -> obj
-      TargetType: Type}
+      TargetType: Type
+      WrapOldName: bool }
 
 
-[<AutoOpen>]
-module private _FsXmlSerializerConfigurationUtils = 
-    let fsIXmlSerializableTypeMappingCache = ConcurrentDictionary()
+//[<AutoOpen>]
+//module private _FsXmlSerializerConfigurationUtils = 
+//    let fsIXmlSerializableTypeMappingCache = ConcurrentDictionary()
 
 type FsXmlSerializerConfiguration =
-    { TypeMapping: Dictionary<Type, FsXmlSerializerTypeMapping> }
+    internal
+        { TypeMapping: Dictionary<Type, FsXmlSerializerTypeMapping>
+          FsIXmlSerializableTypeMappingCache:  ConcurrentDictionary<Type, FsXmlSerializerTypeMapping option>}
 with 
-    member x.AddTypeMapping<'Origin, 'Target>(toXml: 'Origin -> 'Target, ofXml: 'Target -> 'Origin) =
+    member x.AddTypeMapping<'Origin, 'Target>(toXml: 'Origin -> 'Target, ofXml: 'Target -> 'Origin, ?wrapOldName) =
         let typeMapping = 
             let toXml (v: obj) =
                 toXml (v :?> 'Origin)
@@ -51,62 +66,18 @@ with
 
             { ToXmlSerializable = toXml 
               OfXmlSerializable = ofXml
-              TargetType = typeof<'Target>}
+              TargetType = typeof<'Target>
+              WrapOldName = defaultArg wrapOldName false }
 
         x.TypeMapping.Add(typeof<'Origin>, typeMapping)
         x
 
-    member private x.AddTypeMappingByTypeEntity(tp: Type) =
-        
-        fsIXmlSerializableTypeMappingCache.GetOrAdd(tp, valueFactory = fun _ ->
-            match tp.GetInterface(nameof FsIXmlSerializableTypeMapping + "`2") with 
-            | null -> None
-            | itp ->
-                match x.TypeMapping.TryGetValue(tp) with 
-                | true, v -> Some v
-                | false, _ ->
-                    let fullName = typeof<FsIXmlSerializableTypeMapping>.FullName
-                    let genericArguments = itp.GetGenericArguments()
-                    let itpMap = tp.GetInterfaceMap(itp)
-                    let method_toXml = 
-                        itpMap.TargetMethods
-                        |> Array.find(fun m -> 
-                            m.Name.StartsWith(fullName) && m.Name.EndsWith (".ToXml")
-                        )
 
-                    let method_ofXml = 
-                        itpMap.TargetMethods
-                        |> Array.find(fun m -> 
-                            m.Name.StartsWith(fullName) && m.Name.EndsWith (".OfXml")
-                        )
-
-                    let tpMapping =
-                        { TargetType = genericArguments.[1]
-                          ToXmlSerializable = (fun tpObj ->
-                            method_toXml.Invoke(tpObj, [||])
-                        
-                          )
-                          OfXmlSerializable = (fun xml ->
-                            method_ofXml.Invoke(null, [|tp; xml|])
-                          )
-                        }
-
-                    x.TypeMapping.Add(tp, tpMapping)
-                    Some tpMapping
-        )
-        |> ignore
-
-    member x.AddTypeMappingByType(tp: Type) =
-        match tp.IsGenericType with 
-        | true -> 
-            tp.GetGenericArguments()
-            |> Array.iter(fun tp -> x.AddTypeMappingByType(tp))
-
-        | false -> 
-            x.AddTypeMappingByTypeEntity(tp)
 
     static member DefaultValue =
-        { TypeMapping = Dictionary() }
+        { TypeMapping = Dictionary()
+          FsIXmlSerializableTypeMappingCache = ConcurrentDictionary() 
+        }
 
     member internal x.UpdateTypeAndValue_ToXml(tp: Type, value: obj) =
         match x.TypeMapping.TryGetValue tp with 
@@ -129,11 +100,13 @@ with
 [<Interface>]
 type FsIXmlSerializable = 
     abstract member WriteXml: writer: XmlWriter * config: FsXmlSerializerConfiguration -> unit
-    static abstract ReadXmlObj: tp: Type * reader: XmlReader * config: FsXmlSerializerConfiguration -> obj
+    /// NOTE: static abstract for compitiple to .net standard 2.0
+    abstract member ReadXmlObj: tp: Type * reader: XmlReader * config: FsXmlSerializerConfiguration -> obj
     
 type FsIXmlSerializable<'T> =
     inherit FsIXmlSerializable
-    static abstract member ReadXml: tp: Type * reader:XmlReader * config: FsXmlSerializerConfiguration -> 'T
+    /// NOTE: static abstract for compitiple to .net standard 2.0
+    abstract member ReadXml: tp: Type * reader:XmlReader * config: FsXmlSerializerConfiguration -> 'T
 
 
 //type FsIXmlSerializableSchema =
@@ -151,6 +124,7 @@ type FsIXmlSerializable<'T> =
 [<AutoOpen>]
 module private _Utils =
     
+
 
     let itemText (i) =
         "Item" + (i+1).ToString()
@@ -226,7 +200,7 @@ module private _Utils =
         | Record 
         | Union of UnionCaseInfo []
         | SingletonCaseUnion of UnionCaseInfo
-        | FsXmlSerializable
+        | FsXmlSerializableTypeMapping
 
     [<RequireQualifiedAccess>]
     type FsTypeCode =
@@ -273,11 +247,12 @@ module private _Utils =
                             | _ -> failwithf "[Xml serializable] Un supported type %A" tp
 
                         | false -> 
-                            match tp.GetInterface(nameof FsIXmlSerializable) with 
-                            | null -> failwithf "[Xml serializable] Un supported type %A, using FsXmlSerializableSchema instead" tp
+                            match tp.GetInterface_Last(nameof FsIXmlSerializableTypeMapping) with 
+                            | None -> 
+                                failwithf "[Xml serializable] Un supported type %A, using FsXmlSerializableSchema instead" tp
 
-                            | itp ->
-                                FsTypeCode.Object(FsObjectTypeCode.FsXmlSerializable)
+                            | Some itp ->
+                                FsTypeCode.Object(FsObjectTypeCode.FsXmlSerializableTypeMapping)
                 
             | _ -> 
                 match tp.IsEnum with
@@ -611,7 +586,7 @@ module private _Utils =
         | Tuple      of array<FsTypeCodeEx * Type>
 
     let private entityTypeCodeExCache = ConcurrentDictionary()
-    let private typeCodeExCache = ConcurrentDictionary()
+    //let private typeCodeExCache = ConcurrentDictionary()
     let private tupleCodeExCache = ConcurrentDictionary()
 
 
@@ -635,25 +610,34 @@ module private _Utils =
             )
 
 
-        let getOptionType(tp: Type) =
-            typeCodeExCache.GetOrAdd(tp, valueFactory = fun _ ->
-                match tp.Name = "FSharpOption`1" with 
-                | true -> 
-                    let subType = tp.GetGenericArguments().[0]
-                    FsTypeCodeEx.Option(getEntiryType subType, subType)
-                | false -> getEntiryType(tp)
-            )
+        //let getOptionType(tp: Type) =
+        //    typeCodeExCache.GetOrAdd(tp, valueFactory = fun _ ->
+        //        match tp.Name = "FSharpOption`1" with 
+        //        | true -> 
+        //            let subType = tp.GetGenericArguments().[0]
+        //            FsTypeCodeEx.Option(getEntiryType subType, subType)
+        //        | false -> getEntiryType(tp)
+        //    )
 
         tupleCodeExCache.GetOrAdd(tp, valueFactory = fun _ ->
-            match FSharpType.IsTuple tp with 
-            | false -> getOptionType(tp)
-            | true -> 
-                let subTypes = tp.GetGenericArguments()
-                subTypes
-                |> Array.map(fun subType -> 
-                    getOptionType subType, subType
-                )
-                |> FsTypeCodeEx.Tuple
+            let rec loop (tp: Type) =
+                
+                match FSharpType.IsTuple tp with 
+                | false -> 
+                    match tp.Name = "FSharpOption`1" with 
+                    | true -> 
+                        let subType = tp.GetGenericArguments().[0]
+                        FsTypeCodeEx.Option(loop subType, subType)
+                    | false -> getEntiryType(tp)
+
+                | true -> 
+                    let subTypes = tp.GetGenericArguments()
+                    subTypes
+                    |> Array.map(fun subType -> 
+                        loop subType, subType
+                    )
+                    |> FsTypeCodeEx.Tuple
+            loop tp
         )
 
 
@@ -760,23 +744,6 @@ module private _Utils =
             x.TypeName.Replace("Dictionary__", "Entry__")
                 
 
-    //let private defaultObjectCache = ConcurrentDictionary()
-    //let createDefaultObject(tp: Type) =
-    //    defaultObjectCache.GetOrAdd(tp, valueFactory = fun _ ->
-    //        let code = getFsTpCodeEx tp 
-    //        match code with 
-    //        | FsTypeCodeEx.FsTypeCode tpCode ->
-    //            match tpCode with 
-    //            | FsTypeCode.Object tpCode ->
-    //                match tpCode with 
-    //                | FsObjectTypeCode.Union _ ->FormatterServices.GetUninitializedObject(tp)
-    //                | _ -> FormatterServices.GetUninitializedObject(tp)
-
-    //            | _ -> FormatterServices.GetUninitializedObject(tp)
-
-    //        | _ -> FormatterServices.GetUninitializedObject(tp)
-            
-    //    )
 
 
 
@@ -829,6 +796,7 @@ module private _Utils =
             
         member x.ToNamedType() =
             match x with 
+            | Type(_) -> x
             | NamedType _
             | NillableNamedType _ -> x
             | _ ->
@@ -841,6 +809,7 @@ module private _Utils =
 
         member x.ToNamedTypeWith(tp: Type) =
             match x with 
+            | Type (_) -> Type(tp)
             | NamedType (name, _) -> NamedType(name, tp)
             | NillableNamedType (name, _) -> NillableNamedType(name, tp)
             | _ ->
@@ -880,26 +849,58 @@ module private _Utils =
 
 
 
+[<AutoOpen>]
+module private _DefaultObject =
+    let private defaultObjectCache = ConcurrentDictionary()
+    let createDefaultObject(tp: Type) =
+        defaultObjectCache.GetOrAdd(tp, valueFactory = fun _ ->
+            let code = getFsTpCodeEx tp 
+            match code with 
+            | FsTypeCodeEx.FsTypeCode tpCode ->
+                match tpCode with 
+                | FsTypeCode.Object tpCode ->
+                    match tpCode with 
+                    | FsObjectTypeCode.Union cases ->
+                        match tp.IsAbstract with 
+                        | false -> FormatterServices.GetUninitializedObject(tp)
+                        | true ->
+                            let nestTp = 
+                                tp.GetNestedTypes()
+                                |> Array.find(fun m -> m.BaseType = tp)
+
+                            FormatterServices.GetUninitializedObject(nestTp)
+
+                    | _ -> FormatterServices.GetUninitializedObject(tp)
+
+                | _ -> FormatterServices.GetUninitializedObject(tp)
+
+            | _ -> FormatterServices.GetUninitializedObject(tp)
+            
+        )
 
 [<AutoOpen>]
 module private _Util2 =
+
 
     let private getReadXmlObjMethodCache = ConcurrentDictionary()
 
     let getReadXmlObjMethod(tp: Type) =
         getReadXmlObjMethodCache.GetOrAdd(tp, valueFactory = fun _ ->
             let fullName = typeof<FsIXmlSerializable>.FullName
-            let fsIXmlSerializable = tp.GetInterface(nameof FsIXmlSerializable)
+            let instance = Unchecked.defaultof<FsIXmlSerializable>
+            let fsIXmlSerializable = tp.GetInterface_Last(nameof FsIXmlSerializable)
             match fsIXmlSerializable with 
-            | null -> None
-            | itp ->
+            | None -> None
+            | Some itp ->
                 let itpMap = tp.GetInterfaceMap(itp)
 
                 let method = 
                     itpMap.TargetMethods
-                    |> Array.find(fun m -> m.Name = fullName + "." + nameof FsIXmlSerializable.ReadXmlObj)
+                    |> Array.find(fun m -> m.Name = fullName + "." + nameof instance.ReadXmlObj)
 
-                Some method
+                let defaultObj = createDefaultObject tp
+
+                Some (defaultObj, method)
 
         )
 
@@ -925,6 +926,12 @@ module private _Util2 =
     //    )
 
     let private updateSCasablePropertyType_Cache = ConcurrentDictionary()
+    let private updateSCasablePropertyType_Cache__NoUpdateForWrappedTypeName = ConcurrentDictionary()
+
+
+    type FsXmlSerializerTypeMappingPair =
+        { OriginType: Type 
+          TypeMapping: FsXmlSerializerTypeMapping }
 
     type FsXmlSerializerConfiguration with 
 
@@ -975,10 +982,68 @@ module private _Util2 =
             | Some newTp ->
                 Some newTp
 
+        member private x.UpdateType_ToXml_Op__NoUpdateForWrappedTypeName(tp: Type) =
+            match x.TypeMapping.TryGetValue tp with 
+            | false, _ -> None
+            | true, typeMapping -> Some typeMapping
+                
+
+        member private x.UpdateType_ToXml_Op_Ex_Private__NoUpdateForWrappedTypeName(tp: Type) =
+            match x.UpdateType_ToXml_Op__NoUpdateForWrappedTypeName (tp) with 
+            | None ->   
+                match tp.IsGenericType with 
+                | true -> 
+                    let genericArguments = tp.GetGenericArguments()
+                    let genericTypeDefinition = tp.GetGenericTypeDefinition()
+
+                    let mutable genericArgumentsChanged = false
+
+                    let newGenericArguments =
+                        genericArguments
+                        |> Array.map(fun m ->
+                            match x.UpdateType_ToXml_Op_Ex_Private__NoUpdateForWrappedTypeName (m) with 
+                            | None -> m
+                            | Some targetType -> 
+                                genericArgumentsChanged <- true
+                                targetType
+                        )
+
+                    match genericArgumentsChanged with 
+                    | true -> 
+                        let newType = genericTypeDefinition.MakeGenericType(newGenericArguments)
+                        Some newType
+                    | false -> None
+                        
+
+                | false -> None
+
+            | Some tpMapping ->
+                match tpMapping.WrapOldName with 
+                | true -> None
+                | false -> Some tpMapping.TargetType
+
         member internal x.UpdateType_ToXml_Op_Ex(tp: Type) =
             updateSCasablePropertyType_Cache.GetOrAdd(tp, valueFactory = fun _ ->
                 x.UpdateType_ToXml_Op_Ex_Private(tp)
             )
+
+        member private x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Choice(tp: Type) =
+            updateSCasablePropertyType_Cache__NoUpdateForWrappedTypeName.GetOrAdd(tp, valueFactory = fun _ ->
+                let newTp = x.UpdateType_ToXml_Op_Ex_Private__NoUpdateForWrappedTypeName(tp)
+                match newTp with 
+                | None -> None, tp, tp.GetXmlQualifiedName()
+                | Some newTp -> Some 0, newTp, newTp.GetXmlQualifiedName()
+            )
+
+        member private x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName(tp: Type) =
+            let (_, a, b) = x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Choice(tp)
+            a, b
+
+        member private x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Op(tp: Type) =
+            let (code, a, b) = x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Choice(tp)
+            match code with 
+            | None -> None
+            | Some _ -> Some (a, b) 
 
         member private x.CreateNamedTp(tp: SCasablePropertyType, newTp) =
             let tp = 
@@ -1009,12 +1074,30 @@ module private _Util2 =
             | None -> tp
             | Some tp -> tp
 
+        member internal x.UpdateType_ToXml_Ex__NoUpdateForWrappedTypeName(tp: Type) =
+            x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName(tp) 
+
         member internal x.UpdateSCasablePropertyType_ToXml(tp: SCasablePropertyType) =
             match x.UpdateType_ToXml_Op_Ex (tp.PropertyType) with 
             | None -> tp
             | Some newTp ->
                 x.CreateNamedTp(tp, newTp)
+
+        member internal x.UpdateSCasablePropertyType_ToXml__NoUpdateForWrappedTypeName(tp: SCasablePropertyType) =
+            match x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Op (tp.PropertyType) with 
+            | None -> tp
+            | Some (newTp, _) ->
+                x.CreateNamedTp(tp, newTp)
                 
+        member internal x.TryGetTypeMapping(tp: Type) =
+            match x.TypeMapping.TryGetValue (tp) with 
+            | false, _ -> None
+            | true, typeMapping ->
+                { OriginType = tp
+                  TypeMapping = typeMapping }
+                |> Some
+
+
 
         member internal x.UpdateSCasablePropertyType_ToXml_Op(tp: SCasablePropertyType) =
             match x.TypeMapping.TryGetValue (tp.PropertyType) with 
@@ -1031,9 +1114,95 @@ module private _Util2 =
                 |> Some
 
 
+    type SCasablePropertyTypeWithTypeMapping =
+        { SCasablePropertyType : SCasablePropertyType 
+          TypeMapping: option<FsXmlSerializerTypeMappingPair>
+          Type__NoUpdateForWrappedType: Type
+          Type__NoUpdateForWrappedTypeName: XmlQualifiedName }
+
+    with 
+        member x.GenerateElement() =
+            let element = x.SCasablePropertyType.GenerateElement()
+
+            element.SchemaTypeName <- x.Type__NoUpdateForWrappedTypeName
+            element
+
+
+        static member CreateNamedType(name: string, tp: Type, configuration: FsXmlSerializerConfiguration) =
+            let newTp = configuration.UpdateType_ToXml_Ex tp
+            let tpMapping = 
+                configuration.TryGetTypeMapping tp
+
+            let newTp_NoUpdateForWrappedTypeName, newTpName = 
+                configuration.UpdateType_ToXml_Ex__NoUpdateForWrappedTypeName tp
+
+            { SCasablePropertyType = SCasablePropertyType.CreateNamedType(name, newTp)
+              TypeMapping = tpMapping
+              Type__NoUpdateForWrappedType = newTp_NoUpdateForWrappedTypeName
+              Type__NoUpdateForWrappedTypeName = newTpName
+              }
+
+
 
         //member internal x.OF_XML_UpdateSCasablePropertyType(tp: SCasablePropertyType) =
         //    match x.OF_XML_UpdateType(tp.PropertyType) with 
         //    | None -> tp
         //    | Some (newTp) ->
         //        SCasablePropertyType.CreateNamedType(tp.Name, newTp)
+
+
+type FsXmlSerializerConfiguration with 
+    member private x.AddTypeMappingByTypeEntity(tp: Type) =
+        
+        x.FsIXmlSerializableTypeMappingCache.GetOrAdd(tp, valueFactory = fun _ ->
+            match tp.GetInterface_Last(nameof FsIXmlSerializableTypeMapping + "`2") with 
+            | None -> None
+            | Some itp ->
+                match x.TypeMapping.TryGetValue(tp) with 
+                | true, v -> Some v
+                | false, _ ->
+                    let fullName = typeof<FsIXmlSerializableTypeMapping>.FullName
+                    let genericArguments = itp.GetGenericArguments()
+                    let itpMap = tp.GetInterfaceMap(itp)
+                    let method_toXml = 
+                        itpMap.TargetMethods
+                        |> Array.find(fun m -> 
+                            m.Name.StartsWith(fullName) && m.Name.EndsWith (".ToXml")
+                        )
+
+                    let method_ofXml = 
+                        itpMap.TargetMethods
+                        |> Array.find(fun m -> 
+                            m.Name.StartsWith(fullName) && m.Name.EndsWith (".OfXml")
+                        )
+
+                    let defaultObj = createDefaultObject tp :?> FsIXmlSerializableTypeMapping
+
+                    let tpMapping =
+                        { TargetType = genericArguments.[1]
+                          ToXmlSerializable = (fun tpObj ->
+                            method_toXml.Invoke(tpObj, [||])
+                          
+                          )
+                          OfXmlSerializable = (fun xml ->
+                            method_ofXml.Invoke(defaultObj, [|tp; xml|])
+                          )
+                          WrapOldName = defaultObj.WrapOldName
+                        }
+
+                    x.TypeMapping.Add(tp, tpMapping)
+                    Some tpMapping
+        )
+        |> ignore
+
+    member x.AddTypeMappingByType(tp: Type) =
+        match tp.IsGenericType with 
+        | true -> 
+            tp.GetGenericArguments()
+            |> Array.iter(fun tp -> x.AddTypeMappingByType(tp))
+
+        | false -> 
+            x.AddTypeMappingByTypeEntity(tp)
+
+
+

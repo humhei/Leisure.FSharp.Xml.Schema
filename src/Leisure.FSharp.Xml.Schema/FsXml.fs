@@ -74,8 +74,9 @@ type private MapSerializer<'k,'v when 'k : comparison>() =
 
 
 
-type FsXmlSerializer<'T>(configuration) =
+type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
     let configuration = configuration
+    do configuration.FsIXmlSerializableTypeMappingCache.Clear()
     let encoding = System.Text.Encoding.UTF8
     let tp = typeof<'T>
     let __CheckTypeValid =
@@ -151,7 +152,7 @@ type FsXmlSerializer<'T>(configuration) =
 
     //    xsSubmit.Serialize(sww, value)
 
-    member private x.File_WriteXml_NamespaceSchemaLocation(xmlPath, xsdPath) =
+    member private x.File_WriteXml_NamespaceSchemaLocation(xmlPath, xsdPath: string) =
         let xsdFileName = Path.GetFileName xsdPath
         let lines = 
             File.ReadAllLines(xmlPath)
@@ -193,8 +194,52 @@ type FsXmlSerializer<'T>(configuration) =
     //        method.Invoke(subPropSerializer, parameters)
 
     static member private SerializeValue(writer: XmlWriter, prop: SCasablePropertyType, propValue: obj,  configuration: FsXmlSerializerConfiguration, ?inCollection) =        
+        let propValueType = 
+            match propValue with 
+            | null -> None
+            | _ ->  
+                propValue.GetType()
+                |> Some
+
+        let tryWrapOldName_TypeMapping(f) =
+
+            let wrapOldName = 
+                match propValueType with 
+                | None -> None
+                | Some propValueType ->
+                    match configuration.TryGetTypeMapping(propValueType) with 
+                    | None -> None
+                    | Some tpMapping -> 
+                        match tpMapping.TypeMapping.WrapOldName with 
+                        | true -> Some tpMapping.OriginType.Name
+                        | false -> None
+
+                //match propValue with 
+                //| :? FsIXmlSerializableTypeMapping as v -> 
+                //    match v.WrapOldName with 
+                //    | false -> None
+                //    | true -> 
+                //        propValue.GetType().Name
+                //        |> Some
+                //| _ -> None
+
+            match wrapOldName with 
+            | Some oldName -> 
+                writer.WriteStartElement(oldName)
+                f()
+                writer.WriteFullEndElement()
+
+            | None -> f()
+
+
         let prop, propValue = 
+            let prop = 
+                match propValue with 
+                | null -> prop
+                | _ -> prop.ToNamedTypeWith(propValue.GetType())
+
             configuration.UpdateSCasablePropertyTypeAndValue_ToXml(prop, propValue)
+
 
         let propTp = prop.PropertyType
 
@@ -203,6 +248,9 @@ type FsXmlSerializer<'T>(configuration) =
         | FsTypeCodeEx.Tuple (tpCodes) ->
             let inCollection = defaultArg inCollection false
             let ignorePropInCollection(f) =
+                let f() =   
+                    tryWrapOldName_TypeMapping(f)
+
                 match inCollection with 
                 | false -> 
                     writer.WriteStartElement(prop.Name)
@@ -269,6 +317,9 @@ type FsXmlSerializer<'T>(configuration) =
         | FsTypeCodeEx.FsTypeCode tpCode ->
             
             let writeProp(f) =
+                let f() =
+                    tryWrapOldName_TypeMapping(f)
+
                 match prop with 
                 | SCasablePropertyType.NillableNamedType _ -> 
                     writer.WriteStartElement(prop.Name)
@@ -294,7 +345,7 @@ type FsXmlSerializer<'T>(configuration) =
                 | _ -> 
                     writeProp(fun () ->
                         match objectTpCode with 
-                        | FsObjectTypeCode.FsXmlSerializable  -> 
+                        | FsObjectTypeCode.FsXmlSerializableTypeMapping  -> 
                             /// already predicate by previous line (| :? FsIXmlSerializable as xmlSerilizable)
                             failwithf "Invalid token"
 
@@ -404,9 +455,9 @@ type FsXmlSerializer<'T>(configuration) =
             //let r = serializer.Deserialize(reader);
             //r :?> 'T
 
-        | Some method ->
+        | Some (defaultObj, method) ->
             let reader = XmlReader.Create(reader)
-            let r = method.Invoke(null, [|tp; reader; configuration|])
+            let r = method.Invoke(defaultObj, [|tp; reader; configuration|])
             r :?> 'T
 
 
@@ -418,12 +469,15 @@ type FsXmlSerializer<'T>(configuration) =
         let prop0 =
             match propMappingOp with 
             | None -> prop
-            | Some prop -> prop.PropertyType
+            | Some propMapping ->
+                match propMapping.TypeMapping.WrapOldName with
+                | true -> prop
+                | false -> propMapping.PropertyType
 
         let prop =
             match propMappingOp with 
-            | None -> configuration.UpdateSCasablePropertyType_ToXml prop
-            | Some prop -> prop.PropertyType
+            | None -> configuration.UpdateSCasablePropertyType_ToXml__NoUpdateForWrappedTypeName prop
+            | Some propTypeMapping -> prop0
 
         let value = 
             match nodeType with 
@@ -434,8 +488,15 @@ type FsXmlSerializer<'T>(configuration) =
 
                 let propTp = prop0.PropertyType
 
+                let createNullable(text: string, fNull, f) =
+                    match text, prop.Nillable with 
+                    | "", true -> 
+                        fNull()
+                        null
+                    | _ -> f()
+
                 match tpCode with 
-                | FsTypeCodeEx.Tuple (_) ->   
+                | FsTypeCodeEx.Tuple (_) -> 
                     let tpCodes = FSharpType.GetTupleElements propTp
 
                     let inCollection = defaultArg inCollection false
@@ -465,9 +526,14 @@ type FsXmlSerializer<'T>(configuration) =
                         let element = FsXmlSerializer<_>.DeserializeToProp(reader, SCasablePropertyType.NamedType(name, tp), configuration)
                         tupleElements.Add(element)
                     )
-                
-                    let tuple = FSharpValue.MakeTuple(Array.ofSeq tupleElements, propTp)
-                    tuple
+                    
+                    match prop.Nillable, tupleElements.Count with 
+                    | true, 0 -> 
+                        null
+                    | _ ->
+                        let tuple = FSharpValue.MakeTuple(Array.ofSeq tupleElements, propTp)
+                        tuple
+
                 
                 | FsTypeCodeEx.Option (_, _) ->
                     let elementType = propTp.GetGenericArguments().[0]
@@ -534,40 +600,80 @@ type FsXmlSerializer<'T>(configuration) =
                     elements
 
 
-                | FsTypeCodeEx.FsTypeCode tpCode ->
-                    let createNullable(text: string, f) =
-                        match text, prop.Nillable with 
-                        | "", true -> null
-                        | _ -> f()
+                | FsTypeCodeEx.FsTypeCode _ ->
+                    let tpCode = getFsTpCode propTp
+
+
                         
                 
                     match tpCode with 
                     | FsTypeCode.Enum ->
                         reader.Read() |> ignore 
                         let propText = reader.Value
-                        createNullable(propText, fun _ ->
+                        createNullable(propText, ignore, fun _ ->
                             System.Enum.Parse(propTp, propText)
                         )
 
                     | FsTypeCode.ValueType _ -> 
                         reader.Read() |> ignore 
                         let propText = reader.Value
-                        createNullable(propText, fun _ ->
+                        createNullable(propText, ignore, fun _ ->
                             Convert.ChangeType(propText, propTp)
                         )
 
 
                     | FsTypeCode.Object tpCode -> 
                         match getReadXmlObjMethod propTp with 
-                        | Some methodInfo ->
-                            let r = methodInfo.Invoke(null, [|propTp; reader; configuration|])
+                        | Some (defaultObj, methodInfo) ->
+                            let r = methodInfo.Invoke(defaultObj, [|propTp; reader; configuration|])
                             r
 
                         | None -> 
                             match tpCode with 
-                            | FsObjectTypeCode.FsXmlSerializable  -> 
+                            | FsObjectTypeCode.FsXmlSerializableTypeMapping  -> 
                                 /// already predicate by previous line (match getReadXmlObjMethod propTp with)
-                                failwithf "Invalid token"
+                                //let r = FsXmlSerializer<_>.DeserializeToProp(reader, prop0, configuration)
+                                match propMappingOp with 
+                                | None ->  failwith "Invalid token"
+                                | Some typeMapping ->
+                                    match typeMapping.TypeMapping.WrapOldName with 
+                                    | true -> 
+                                        let readInnerValue() =
+                                            let mutable valueMutable = null
+                                            advanceReaderFullElement(reader, fun _ ->
+                                                let tpName = reader.Name
+                                                let value = 
+                                                    FsXmlSerializer<_>.DeserializeToProp(
+                                                        reader,
+                                                        SCasablePropertyType.NamedType(tpName, typeMapping.TypeMapping.TargetType),
+                                                        configuration
+                                                    )
+
+                                                valueMutable <- value
+                                            )
+
+                                            |> ignore
+
+                                            valueMutable
+                                        
+                                        match prop.Nillable with 
+                                        | true -> 
+                                            let isNull = 
+                                                let attr = reader.GetAttribute("nil", W3XMLSchemaInstance)
+                                                match attr with 
+                                                | null -> false
+                                                | attr -> System.Boolean.Parse attr
+
+                                            match isNull with 
+                                            | true -> 
+                                                reader.Read() |> ignore
+                                                null
+                                            
+                                            | false -> readInnerValue()
+
+                                        | false -> readInnerValue()
+
+                                    | false -> failwithf "Invalid token"
 
                             | FsObjectTypeCode.Record ->
                                 FsXmlSerializer<_>.DeserializeToRecordStatic(reader, propTp, configuration)

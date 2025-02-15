@@ -1,5 +1,6 @@
 # Leisure.FSharp.Xml.Schema
 serialize xml and xsd schema file for fsharp types toghther
+
 so your can edit your xml structure in editor in type safe mode(e.g by vs code xmlExtension)
 
 

@@ -2,9 +2,8 @@
 open Expecto
 open Leisure.FSharp.Xml.Schema
 open System.Collections.Concurrent
+open System
 open System.Drawing
-open System.Collections
-open System.Collections.Generic
 
 module DefaultSerializer = 
 
@@ -106,9 +105,9 @@ module GeneralRecordWithNestedRecord =
 
         interface FsIXmlSerializable<ColorMapping> with
 
-            static member ReadXml(tp, reader, config) = ColorMapping.ReadXml(reader, config)
+            member __.ReadXml(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
-            static member ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
+            member __.ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
             member x.WriteXml(writer, config) = 
                 let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
@@ -171,9 +170,9 @@ module GeneralRecordWithSingletonCase =
 
         interface FsIXmlSerializable<ColorMapping> with
 
-            static member ReadXml(tp, reader, config) = ColorMapping.ReadXml(reader, config)
+            member __.ReadXml(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
-            static member ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
+            member __.ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
             member x.WriteXml(writer, config) = 
                 let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
@@ -237,9 +236,9 @@ module GeneralRecordWithTuple =
 
         interface FsIXmlSerializable<ColorMapping> with
 
-            static member ReadXml(tp, reader, config) = ColorMapping.ReadXml(reader, config)
+            member __.ReadXml(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
-            static member ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
+            member __.ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
             member x.WriteXml(writer, config) = 
                 let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
@@ -311,9 +310,9 @@ module GeneralRecordWithUnion =
 
         interface FsIXmlSerializable<ColorMapping> with
 
-            static member ReadXml(tp, reader, config) = ColorMapping.ReadXml(reader, config)
+            member __.ReadXml(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
-            static member ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
+            member __.ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
             member x.WriteXml(writer, config) = 
                 let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
@@ -331,10 +330,13 @@ module GeneralRecordWithUnion =
 [<RequireQualifiedAccess>]
 module GeneralRecordWithCustomMapping =
 
-   type ToleranceValue(v) =
-        inherit POCOBaseV<float>(v)
+   type ToleranceValue private (v) =
+        inherit POCOBaseV<float * float>(v)
         
         member x.Value = v
+
+        static member Create(v) =
+            ToleranceValue(v)
 
 
    
@@ -382,9 +384,9 @@ module GeneralRecordWithCustomMapping =
 
         interface FsIXmlSerializable<ColorMapping> with
 
-            static member ReadXml(tp, reader, config) = ColorMapping.ReadXml(reader, config)
+            member __.ReadXml(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
-            static member ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
+            member __.ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
             member x.WriteXml(writer, config) = 
                 let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
@@ -398,7 +400,7 @@ module GeneralRecordWithCustomMapping =
               Tolerance = 
                 [
                     { Tolerance =
-                        Tolerance.ByValuesOption (None, Some (ToleranceValue 6))
+                        Tolerance.ByValuesOption (None, Some (ToleranceValue.Create (6, 6)))
                     }
                 ]
             }
@@ -409,6 +411,11 @@ let fail() = Expect.isTrue false "failed"
 let config = FsXmlSerializerConfiguration.DefaultValue
 System.IO.Directory.CreateDirectory(@"xml")
 
+
+type ABC =
+    | A of int
+    | B 
+    | C 
 let MyTests =
     
   testList "MyTests" [
@@ -499,15 +506,15 @@ let MyTests =
       | true -> pass()
       | false -> fail()
 
-    ftestCase "IXmlSerializable general Record with custom mapping" <| fun _ ->
+    testCase "IXmlSerializable general Record with custom mapping" <| fun _ ->
       let fileID = 7
       let xmlFile = sprintf @"xml\%d.xml" fileID
       let xsdFile = sprintf @"xml\%d.xsd" fileID 
       
       let config = 
-        FsXmlSerializerConfiguration.DefaultValue.AddTypeMapping<GeneralRecordWithCustomMapping.ToleranceValue, float>(
+        FsXmlSerializerConfiguration.DefaultValue.AddTypeMapping<GeneralRecordWithCustomMapping.ToleranceValue, float * float>(
             toXml = (fun m -> m.Value),
-            ofXml = (fun m -> GeneralRecordWithCustomMapping.ToleranceValue m)
+            ofXml = (fun m -> GeneralRecordWithCustomMapping.ToleranceValue.Create(6, 6))
         )
 
       let data = GeneralRecordWithCustomMapping.ColorMapping.SampleData
@@ -519,16 +526,10 @@ let MyTests =
       | true -> pass()
       | false -> fail()
 
-      let m = new FsXmlSerializer<GeneralRecordWithCustomMapping.ColorMapping>(config)
-      let cc = m.SerializeToFile(@"xml\7.xml", @"xml\7.xsd", GeneralRecordWithCustomMapping.ColorMapping.SampleData)
-      let p = m.DeserializeFromFile(@"xml\7.xml")
-      pass()
-
     testCase "IXmlSerializable general Record with POCOBase FsIXmlSerializableTypeMapping" <| fun _ ->
       let fileID = 8
       let xmlFile = sprintf @"xml\%d.xml" fileID
       let xsdFile = sprintf @"xml\%d.xsd" fileID
-
       let data = GeneralRecordWithCustomMapping.ColorMapping.SampleData
       let config = FsXmlSerializerConfiguration.DefaultValue
 
