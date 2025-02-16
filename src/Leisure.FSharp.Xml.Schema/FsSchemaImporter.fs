@@ -192,27 +192,6 @@ module rec FsSchemaTypes =
             
             innerType
 
-            //let element = 
-            //    let name = x.Name
-            //    match enumValue with 
-            //    | WrapOldNameEnum.WrapOldName ->
-            //        XmlSchemaElement(
-            //            Name = name,
-            //            SchemaType = innerType
-            //        )
-
-            //    | WrapOldNameEnum.UsingCurrentName ->
-            //        XmlSchemaElement.create_isOption isOption name innerType 
-
-            //let propSequence = 
-            //    let sequence = XmlSchemaSequence()
-            //    sequence.Items.Add(element) |> ignore
-            //    sequence
-
-            //XmlSchemaComplexType(
-            //    Name = tp.GetXmlQualifiedName().Name,
-            //    Particle = propSequence
-            //)
 
     type FsSchemaComplexType_Entry =
         { KeyElement: XmlSchemaElement
