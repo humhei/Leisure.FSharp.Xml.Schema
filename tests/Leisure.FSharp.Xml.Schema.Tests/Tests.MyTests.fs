@@ -350,30 +350,45 @@ module GeneralRecordWithCustomMapping =
        | ByValuesOption of ToleranceValue option * ToleranceValue option
        | ByTupleList of list<ToleranceValue option * ToleranceValue>
 
+    type ColorSpaceEnum =
+        | CMYK = 0
+        | RGB = 1
+
+    type ColorSpace private () =
+        inherit AutoSerializationPOCOBase<ColorSpaceEnum>()
     
+        new (colorSpaceValue: ColorSpaceEnum) as this =
+            new ColorSpace()
+            then this.SetPOCOKey(colorSpaceValue)
+
+
     type InnerTolerance =
         { Tolerance: Tolerance }
 
     type ColorMapping_XMLScheme =
         { OriginColor: KnownColor
           TargetColor: KnownColor
-          Tolerance: InnerTolerance list }
+          //Tolerance: InnerTolerance list
+          ColorSpace: ColorSpace }
 
     type ColorMapping =
         { OriginKnownColor: KnownColor
           TargetKnownColor: KnownColor
-          Tolerance: InnerTolerance list }
+          //Tolerance: InnerTolerance list
+          ColorSpace: ColorSpace }
     with 
         member x.XMLScheme = 
             { OriginColor = x.OriginKnownColor 
               TargetColor = x.TargetKnownColor
-              Tolerance  = x.Tolerance }
+              //Tolerance  = x.Tolerance
+              ColorSpace = x.ColorSpace }
 
         static member OfScheme(scheme: ColorMapping_XMLScheme) =
             {
                 OriginKnownColor = scheme.OriginColor
                 TargetKnownColor = scheme.TargetColor
-                Tolerance        = scheme.Tolerance
+                //Tolerance        = scheme.Tolerance
+                ColorSpace       = scheme.ColorSpace
             }
 
         static member ReadXml(reader, config) =
@@ -397,14 +412,35 @@ module GeneralRecordWithCustomMapping =
         static member SampleData =
             { OriginKnownColor = KnownColor.Black 
               TargetKnownColor = KnownColor.Red
-              Tolerance = 
-                [
-                    { Tolerance =
-                        Tolerance.ByValuesOption (None, Some (ToleranceValue.Create (6, 6)))
-                    }
-                ]
+              //Tolerance = 
+              //  [
+              //      { Tolerance =
+              //          Tolerance.ByValuesOption (None, Some (ToleranceValue.Create (6, 6)))
+              //      }
+              //  ]
+              ColorSpace = ColorSpace(ColorSpaceEnum.RGB)
             }
 
+module GeneralRecordWithSkipComparasion =
+    [<RequireQualifiedAccess>]
+    type DecimalSelector =
+        | BetweenCase of float * float 
+        | EqualTo of float
+        | BiggerOrEqual of float
+        | SmallerOrEqual of float
+        | True
+
+    type Record =
+        { (*DecimalSelector: SkipComparation_Serializable<DecimalSelector>*)
+          ProductName: ProductName }
+    with 
+        static member SampleData =
+            let decimalSelector = 
+                DecimalSelector.BiggerOrEqual(100.)
+                |> SkipComparation_Serializable
+
+            { (*DecimalSelector = decimalSelector*)
+              ProductName = ProductName("ProductName")}
 
 let pass() = Expect.isTrue true "passed"
 let fail() = Expect.isTrue false "failed"
@@ -534,6 +570,20 @@ let MyTests =
       let config = FsXmlSerializerConfiguration.DefaultValue
 
       let serializer = new FsXmlSerializer<GeneralRecordWithCustomMapping.ColorMapping>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
+    ftestCase "IXmlSerializable general Record with SkipComparasion" <| fun _ ->
+      let fileID = 9
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID
+      let data = GeneralRecordWithSkipComparasion.Record.SampleData
+      let config = FsXmlSerializerConfiguration.DefaultValue
+
+      let serializer = new FsXmlSerializer<GeneralRecordWithSkipComparasion.Record>(config)
       serializer.SerializeToFile(xmlFile, xsdFile, data)
       let data2 = serializer.DeserializeFromFile(xmlFile)
       match data = data2 with 

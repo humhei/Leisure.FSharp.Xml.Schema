@@ -95,7 +95,7 @@ type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
         let props = tp.GetProperties()
         let tp = 
             props
-            |> Array.tryFind(fun m -> m.Name = "XMLScheme")
+            |> Array.tryFind(fun m -> m.Name = "XMLSchema")
             |> function
                 | None -> tp
 
@@ -111,11 +111,11 @@ type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
 
     member private x.File_WriteFsXsd(xsdPath: string) =
         use tw = new StreamWriter(xsdPath)
-        let importer = new FsSchemeImporter(configuration);
+        let importer = new FsSchemaImporter(configuration);
         let props = tp.GetProperties()
         let tp = 
             props
-            |> Array.tryFind(fun m -> m.Name = "XMLScheme")
+            |> Array.tryFind(fun m -> m.Name = "XMLSchema")
             |> function
                 | None -> tp
 
@@ -164,11 +164,11 @@ type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
         File.WriteAllLines(xmlPath, lines)
      
 
-    member private x.File_TrimXsdSchemeEnd(xsdPath) =
+    member private x.File_TrimXsdSchemaEnd(xsdPath) =
         let lines = 
             File.ReadAllLines(xsdPath)
             |> Array.mapi(fun i line ->
-                line.Replace("_XMLScheme\"", $"\"")
+                line.Replace("_XMLSchema\"", $"\"")
             )
         File.WriteAllLines(xsdPath, lines)
      
@@ -201,19 +201,19 @@ type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
                 propValue.GetType()
                 |> Some
 
-        let tryWrapOldName_TypeMapping(f) =
-
-            let wrapOldName = 
-                match propValueType with 
+        let wrapOldName = 
+            match propValueType with 
+            | None -> None
+            | Some propValueType ->
+                match configuration.TryGetTypeMapping(propValueType) with 
                 | None -> None
-                | Some propValueType ->
-                    match configuration.TryGetTypeMapping(propValueType) with 
-                    | None -> None
-                    | Some tpMapping -> 
-                        match tpMapping.TypeMapping.WrapOldName with 
-                        | true -> Some tpMapping.OriginType.Name
-                        | false -> None
+                | Some tpMapping -> 
+                    match tpMapping.TypeMapping.WrapOldName with 
+                    | true -> Some tpMapping.OriginType.Name
+                    | false -> None
 
+
+        let tryWrapOldName_TypeMapping(f) =
                 //match propValue with 
                 //| :? FsIXmlSerializableTypeMapping as v -> 
                 //    match v.WrapOldName with 
@@ -331,10 +331,38 @@ type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
 
                 writer.WriteFullEndElement()
 
+            let writePropValueType(f) =
+                match wrapOldName with 
+                | None -> 
+                    match prop with 
+                    | SCasablePropertyType.NillableNamedType _ -> 
+                        writer.WriteStartElement(prop.Name)
+                        writer.WriteAttributeString("nil", W3XMLSchemaInstance, "false")
+                        f()
+                    | _ -> 
+                        writer.WriteStartElement(prop.Name)
+                        f()
+
+                    writer.WriteFullEndElement()
+
+
+                | Some oldName ->
+                    writer.WriteStartElement(oldName)
+                    match prop with 
+                    | SCasablePropertyType.NillableNamedType _ -> 
+                        writer.WriteAttributeString("nil", W3XMLSchemaInstance, "false")
+                        f()
+                    | _ -> 
+                        f()
+
+                    writer.WriteFullEndElement()
+
+
+
             match tpCode with 
             | FsTypeCode.ValueType _
             | FsTypeCode.Enum ->
-                writeProp(fun () ->
+                writePropValueType(fun () ->
                     writer.WriteValue(propValue.ToString())
                 )
                     
@@ -638,14 +666,32 @@ type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
                                 | Some typeMapping ->
                                     match typeMapping.TypeMapping.WrapOldName with 
                                     | true -> 
+                                        let targetTypeCode = getFsTpCodeEx typeMapping.TypeMapping.TargetType
+                                        let advanceReader_wrapOldName(reader, f) =
+                                            match targetTypeCode with 
+                                            | FsTypeCodeEx.FsTypeCode (FsTypeCode.Enum)
+                                            | FsTypeCodeEx.FsTypeCode (FsTypeCode.ValueType _) -> f 0
+                                            | _ -> 
+                                                advanceReaderFullElement(reader, f)
+                                                |> ignore
+
                                         let readInnerValue() =
                                             let mutable valueMutable = null
-                                            advanceReaderFullElement(reader, fun _ ->
+                                            advanceReader_wrapOldName(reader, fun _ ->
                                                 let tpName = reader.Name
+                                                let prop = 
+                                                    SCasablePropertyType.NamedType(tpName, typeMapping.TypeMapping.TargetType)
+
+                                                    //match prop.Nillable with 
+                                                    //| true -> 
+                                                    //    SCasablePropertyType.NillableNamedType(tpName, typeMapping.TypeMapping.TargetType)
+
+                                                    //| false -> SCasablePropertyType.NamedType(tpName, typeMapping.TypeMapping.TargetType)
+
                                                 let value = 
                                                     FsXmlSerializer<_>.DeserializeToProp(
                                                         reader,
-                                                        SCasablePropertyType.NamedType(tpName, typeMapping.TypeMapping.TargetType),
+                                                        prop,
                                                         configuration
                                                     )
 
@@ -775,8 +821,10 @@ type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
         match propMappingOp with 
         | None -> value
         | Some propMappingOp -> 
+
             match prop.Nillable, value with 
             | true, null -> null
+            | false, null -> failwithf "%A Value cannot be null" prop
             | _ -> propMappingOp.TypeMapping.OfXmlSerializable value
                     
 
@@ -833,7 +881,7 @@ type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
             | false -> List.rev accum
 
         advanceReader(reader) |> ignore
-        match reader.Name = tp.Name || reader.Name + "_XMLScheme" = tp.Name with 
+        match reader.Name = tp.Name || reader.Name + "_XMLSchema" = tp.Name with 
         | true -> 
             reader.Read() |> ignore
             |> ignore
@@ -850,5 +898,5 @@ type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
         x.File_WriteFsXsd(xsdPath)
         x.File_WriteXml(xmlPath, value)
         //x.File_WriteCsXsd(xsdPath)
-        x.File_TrimXsdSchemeEnd(xsdPath)
+        x.File_TrimXsdSchemaEnd(xsdPath)
         x.File_WriteXml_NamespaceSchemaLocation(xmlPath, xsdPath)

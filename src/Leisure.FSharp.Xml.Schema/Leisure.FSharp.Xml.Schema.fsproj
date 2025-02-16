@@ -5,7 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Types.fs" />
-    <Compile Include="FsSchemeImporter.fs" />
+    <Compile Include="FsSchemaImporter.fs" />
     <Compile Include="FsXml.fs" />
   </ItemGroup>
   <ItemGroup>

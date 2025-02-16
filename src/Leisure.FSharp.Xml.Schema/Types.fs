@@ -1198,6 +1198,8 @@ type FsXmlSerializerConfiguration with
     member x.AddTypeMappingByType(tp: Type) =
         match tp.IsGenericType with 
         | true -> 
+            x.AddTypeMappingByTypeEntity(tp)
+
             tp.GetGenericArguments()
             |> Array.iter(fun tp -> x.AddTypeMappingByType(tp))
 
