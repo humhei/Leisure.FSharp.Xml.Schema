@@ -43,7 +43,8 @@ module GeneralRecord =
         { OriginKnownColor: Set<KnownColor>
           TargetKnownColor: KnownColor
           IndexedCard: Map<int, Card>
-          ID: int option  }
+          ID: int option
+        }
     with 
         static member SampleData =
             { OriginKnownColor = Set.ofList [KnownColor.Black; KnownColor.Silver] 
@@ -56,6 +57,7 @@ module GeneralRecord =
                 |> Seq.map(fun m -> m.Key, m.Value)
                 |> Map.ofSeq
               ID = Some 1
+
               }
         
 
@@ -74,7 +76,7 @@ module GeneralRecordWithNestedRecord =
         }
 
     [<CLIMutable>]
-    type ColorMapping_XMLScheme =
+    type ColorMapping_XMLSchema =
         { OriginColor: KnownColor
           TargetColor: KnownColor
           InnerProps: InnerProps }
@@ -85,22 +87,22 @@ module GeneralRecordWithNestedRecord =
           TargetKnownColor: KnownColor
           InnerProps: InnerProps }
     with 
-        member x.XMLScheme = 
+        member x.XMLSchema = 
             { OriginColor = x.OriginKnownColor 
               TargetColor = x.TargetKnownColor
               InnerProps  = x.InnerProps }
 
-        static member OfScheme(scheme: ColorMapping_XMLScheme) =
+        static member OfSchema(schema: ColorMapping_XMLSchema) =
             {
-                OriginKnownColor = scheme.OriginColor
-                TargetKnownColor = scheme.TargetColor
-                InnerProps        = scheme.InnerProps
+                OriginKnownColor = schema.OriginColor
+                TargetKnownColor = schema.TargetColor
+                InnerProps        = schema.InnerProps
             }
 
         static member ReadXml(reader, config) =
-            let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
+            let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
             xsSubmit.DeserializeToRecord(reader)
-            |> ColorMapping.OfScheme
+            |> ColorMapping.OfSchema
             
 
         interface FsIXmlSerializable<ColorMapping> with
@@ -110,8 +112,8 @@ module GeneralRecordWithNestedRecord =
             member __.ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
             member x.WriteXml(writer, config) = 
-                let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
-                xsSubmit.SerializeRecord(writer, x.XMLScheme)
+                let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
+                xsSubmit.SerializeRecord(writer, x.XMLSchema)
 
 
         static member SampleData =
@@ -139,7 +141,7 @@ module GeneralRecordWithSingletonCase =
    
 
     [<CLIMutable>]
-    type ColorMapping_XMLScheme =
+    type ColorMapping_XMLSchema =
         { OriginColor: KnownColor
           TargetColor: KnownColor
           Tolerance: Tolerance }
@@ -150,22 +152,22 @@ module GeneralRecordWithSingletonCase =
           TargetKnownColor: KnownColor
           Tolerance: Tolerance }
     with 
-        member x.XMLScheme = 
+        member x.XMLSchema = 
             { OriginColor = x.OriginKnownColor 
               TargetColor = x.TargetKnownColor
               Tolerance  = x.Tolerance }
 
-        static member OfScheme(scheme: ColorMapping_XMLScheme) =
+        static member OfSchema(schema: ColorMapping_XMLSchema) =
             {
-                OriginKnownColor = scheme.OriginColor
-                TargetKnownColor = scheme.TargetColor
-                Tolerance        = scheme.Tolerance
+                OriginKnownColor = schema.OriginColor
+                TargetKnownColor = schema.TargetColor
+                Tolerance        = schema.Tolerance
             }
 
         static member ReadXml(reader, config) =
-            let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
+            let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
             xsSubmit.DeserializeToRecord(reader)
-            |> ColorMapping.OfScheme
+            |> ColorMapping.OfSchema
             
 
         interface FsIXmlSerializable<ColorMapping> with
@@ -175,8 +177,8 @@ module GeneralRecordWithSingletonCase =
             member __.ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
             member x.WriteXml(writer, config) = 
-                let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
-                xsSubmit.SerializeRecord(writer, x.XMLScheme)
+                let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
+                xsSubmit.SerializeRecord(writer, x.XMLSchema)
 
 
         static member SampleData =
@@ -205,33 +207,37 @@ module GeneralRecordWithTuple =
    
 
     [<CLIMutable>]
-    type ColorMapping_XMLScheme =
+    type ColorMapping_XMLSchema =
         { OriginColor: KnownColor
           TargetColor: KnownColor
-          Tolerance: float option * float }
+          Tolerance: float option * float
+          AddtionalTolerances: list<float option * float> }
 
     [<CLIMutable>]
     type ColorMapping =
         { OriginKnownColor: KnownColor
           TargetKnownColor: KnownColor
-          Tolerance: float option * float }
+          Tolerance: float option * float
+          AddtionalTolerances: list<float option * float>}
     with 
-        member x.XMLScheme = 
+        member x.XMLSchema = 
             { OriginColor = x.OriginKnownColor 
               TargetColor = x.TargetKnownColor
-              Tolerance  = x.Tolerance }
+              Tolerance  = x.Tolerance
+              AddtionalTolerances = x.AddtionalTolerances }
 
-        static member OfScheme(scheme: ColorMapping_XMLScheme) =
+        static member OfSchema(schema: ColorMapping_XMLSchema) =
             {
-                OriginKnownColor = scheme.OriginColor
-                TargetKnownColor = scheme.TargetColor
-                Tolerance        = scheme.Tolerance
+                OriginKnownColor    = schema.OriginColor
+                TargetKnownColor    = schema.TargetColor
+                Tolerance           = schema.Tolerance
+                AddtionalTolerances = schema.AddtionalTolerances
             }
 
         static member ReadXml(reader, config) =
-            let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
+            let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
             xsSubmit.DeserializeToRecord(reader)
-            |> ColorMapping.OfScheme
+            |> ColorMapping.OfSchema
             
 
         interface FsIXmlSerializable<ColorMapping> with
@@ -241,14 +247,17 @@ module GeneralRecordWithTuple =
             member __.ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
             member x.WriteXml(writer, config) = 
-                let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
-                xsSubmit.SerializeRecord(writer, x.XMLScheme)
+                let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
+                xsSubmit.SerializeRecord(writer, x.XMLSchema)
 
 
         static member SampleData =
             { OriginKnownColor = KnownColor.Black 
               TargetKnownColor = KnownColor.Red
-              Tolerance = (Some 5, 3) }
+              Tolerance = (Some 5, 3)
+              AddtionalTolerances = 
+                [(Some 7, 2); (Some 3, 6)]  
+            }
 
 
 [<RequireQualifiedAccess>]
@@ -279,7 +288,7 @@ module GeneralRecordWithUnion =
    
 
     [<CLIMutable>]
-    type ColorMapping_XMLScheme =
+    type ColorMapping_XMLSchema =
         { OriginColor: KnownColor
           TargetColor: KnownColor
           Tolerance: Tolerance }
@@ -290,22 +299,22 @@ module GeneralRecordWithUnion =
           TargetKnownColor: KnownColor
           Tolerance: Tolerance }
     with 
-        member x.XMLScheme = 
+        member x.XMLSchema = 
             { OriginColor = x.OriginKnownColor 
               TargetColor = x.TargetKnownColor
               Tolerance  = x.Tolerance }
 
-        static member OfScheme(scheme: ColorMapping_XMLScheme) =
+        static member OfSchema(schema: ColorMapping_XMLSchema) =
             {
-                OriginKnownColor = scheme.OriginColor
-                TargetKnownColor = scheme.TargetColor
-                Tolerance        = scheme.Tolerance
+                OriginKnownColor = schema.OriginColor
+                TargetKnownColor = schema.TargetColor
+                Tolerance        = schema.Tolerance
             }
 
         static member ReadXml(reader, config) =
-            let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
+            let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
             xsSubmit.DeserializeToRecord(reader)
-            |> ColorMapping.OfScheme
+            |> ColorMapping.OfSchema
             
 
         interface FsIXmlSerializable<ColorMapping> with
@@ -315,14 +324,14 @@ module GeneralRecordWithUnion =
             member __.ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
             member x.WriteXml(writer, config) = 
-                let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
-                xsSubmit.SerializeRecord(writer, x.XMLScheme)
+                let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
+                xsSubmit.SerializeRecord(writer, x.XMLSchema)
 
 
         static member SampleData =
             { OriginKnownColor = KnownColor.Black 
               TargetKnownColor = KnownColor.Red
-              Tolerance = Tolerance.ByValueList[5; 6] }
+              Tolerance = Tolerance.ByTupleList([(Some 6, 6); (None, 3)]) }
 
 
 
@@ -365,36 +374,40 @@ module GeneralRecordWithCustomMapping =
     type InnerTolerance =
         { Tolerance: Tolerance }
 
-    type ColorMapping_XMLScheme =
+    type ColorMapping_XMLSchema =
         { OriginColor: KnownColor
           TargetColor: KnownColor
           //Tolerance: InnerTolerance list
-          ColorSpace: ColorSpace }
+          Tolerance: ToleranceValue
+          //ColorSpace: ColorSpace
+        }
 
     type ColorMapping =
         { OriginKnownColor: KnownColor
           TargetKnownColor: KnownColor
-          //Tolerance: InnerTolerance list
-          ColorSpace: ColorSpace }
+          Tolerance: ToleranceValue
+          //ColorSpace: ColorSpace
+        }
     with 
-        member x.XMLScheme = 
+        member x.XMLSchema = 
             { OriginColor = x.OriginKnownColor 
               TargetColor = x.TargetKnownColor
-              //Tolerance  = x.Tolerance
-              ColorSpace = x.ColorSpace }
+              Tolerance  = x.Tolerance
+              //ColorSpace = x.ColorSpace 
+            }
 
-        static member OfScheme(scheme: ColorMapping_XMLScheme) =
+        static member OfSchema(schema: ColorMapping_XMLSchema) =
             {
-                OriginKnownColor = scheme.OriginColor
-                TargetKnownColor = scheme.TargetColor
-                //Tolerance        = scheme.Tolerance
-                ColorSpace       = scheme.ColorSpace
+                OriginKnownColor = schema.OriginColor
+                TargetKnownColor = schema.TargetColor
+                Tolerance        = schema.Tolerance
+                //ColorSpace       = schema.ColorSpace
             }
 
         static member ReadXml(reader, config) =
-            let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
+            let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
             xsSubmit.DeserializeToRecord(reader)
-            |> ColorMapping.OfScheme
+            |> ColorMapping.OfSchema
             
 
         interface FsIXmlSerializable<ColorMapping> with
@@ -404,21 +417,22 @@ module GeneralRecordWithCustomMapping =
             member __.ReadXmlObj(tp, reader, config) = ColorMapping.ReadXml(reader, config)
 
             member x.WriteXml(writer, config) = 
-                let xsSubmit = FsXmlSerializer<ColorMapping_XMLScheme>(config)
-                xsSubmit.SerializeRecord(writer, x.XMLScheme)
+                let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
+                xsSubmit.SerializeRecord(writer, x.XMLSchema)
 
 
 
         static member SampleData =
             { OriginKnownColor = KnownColor.Black 
               TargetKnownColor = KnownColor.Red
-              //Tolerance = 
-              //  [
-              //      { Tolerance =
-              //          Tolerance.ByValuesOption (None, Some (ToleranceValue.Create (6, 6)))
-              //      }
-              //  ]
-              ColorSpace = ColorSpace(ColorSpaceEnum.RGB)
+              Tolerance = 
+                ToleranceValue.Create(5, 6)
+                //[
+                //    { Tolerance =
+                //        Tolerance.ByValuesOption (None, Some (ToleranceValue.Create (6, 6)))
+                //    }
+                //]
+              //ColorSpace = ColorSpace(ColorSpaceEnum.RGB)
             }
 
 module GeneralRecordWithSkipComparasion =
@@ -542,7 +556,7 @@ let MyTests =
       | true -> pass()
       | false -> fail()
 
-    testCase "IXmlSerializable general Record with custom mapping" <| fun _ ->
+    ftestCase "IXmlSerializable general Record with custom mapping" <| fun _ ->
       let fileID = 7
       let xmlFile = sprintf @"xml\%d.xml" fileID
       let xsdFile = sprintf @"xml\%d.xsd" fileID 
@@ -576,7 +590,7 @@ let MyTests =
       | true -> pass()
       | false -> fail()
 
-    ftestCase "IXmlSerializable general Record with SkipComparasion" <| fun _ ->
+    testCase "IXmlSerializable general Record with SkipComparasion" <| fun _ ->
       let fileID = 9
       let xmlFile = sprintf @"xml\%d.xml" fileID
       let xsdFile = sprintf @"xml\%d.xsd" fileID

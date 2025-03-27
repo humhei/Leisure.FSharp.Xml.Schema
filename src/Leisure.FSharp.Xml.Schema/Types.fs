@@ -49,10 +49,13 @@ type FsXmlSerializerTypeMapping =
 //module private _FsXmlSerializerConfigurationUtils = 
 //    let fsIXmlSerializableTypeMappingCache = ConcurrentDictionary()
 
+type IFsSchemaType = interface end
+
 type FsXmlSerializerConfiguration =
     internal
         { TypeMapping: Dictionary<Type, FsXmlSerializerTypeMapping>
-          FsIXmlSerializableTypeMappingCache:  ConcurrentDictionary<Type, FsXmlSerializerTypeMapping option>}
+          FsIXmlSerializableTypeMappingCache:  ConcurrentDictionary<Type, FsXmlSerializerTypeMapping option>
+          FsSchemaTypeCache: ConcurrentDictionary<Type, IFsSchemaType>}
 with 
     member x.AddTypeMapping<'Origin, 'Target>(toXml: 'Origin -> 'Target, ofXml: 'Target -> 'Origin, ?wrapOldName) =
         let typeMapping = 
@@ -77,6 +80,7 @@ with
     static member DefaultValue =
         { TypeMapping = Dictionary()
           FsIXmlSerializableTypeMappingCache = ConcurrentDictionary() 
+          FsSchemaTypeCache = ConcurrentDictionary()
         }
 
     member internal x.UpdateTypeAndValue_ToXml(tp: Type, value: obj) =
@@ -122,9 +126,8 @@ type FsIXmlSerializable<'T> =
 
 
 [<AutoOpen>]
-module private _Utils =
+module internal _Utils =
     
-
 
     let itemText (i) =
         "Item" + (i+1).ToString()
@@ -386,8 +389,9 @@ module private _Utils =
 
             list
 
-        let makeOption(tp, elementType: Type, elementValue) =
-            let cases = FSharpType.GetUnionCases tp
+        let makeOption(elementTp, elementValue) =   
+            let optionTp = typedefof<option<_>>.MakeGenericType([|elementTp|])
+            let cases = FSharpType.GetUnionCases optionTp
             match elementValue with 
             | null -> 
                 FSharpValue.MakeUnion(cases.[0], [||])
@@ -642,7 +646,7 @@ module private _Utils =
 
 
     type FsTypeCodeEx with 
-        member private x.ValueTypeCodeToXmlTypeName(tpCode: TypeCode) =
+        static member ValueTypeCodeToXmlTypeName(tpCode: TypeCode) =
             let tpName = 
                 match tpCode with 
                 | TypeCode.Char 
@@ -666,186 +670,186 @@ module private _Utils =
 
             tpName
 
-        member x.GetXmlQualifiedName(tp: Type): XmlQualifiedName =
+        //member x.GetXmlQualifiedName(tp: Type): XmlQualifiedName =
 
-            let getName_InLoop(tp: Type) =
-                (getFsTpCodeEx(tp)).GetXmlQualifiedName(tp).Name
+        //    let getName_InLoop(tp: Type) =
+        //        (getFsTpCodeEx(tp)).GetXmlQualifiedName(tp).Name
 
-            match x with 
-            | FsTypeCodeEx.Option (elementTpCode, elementType) ->
-                elementTpCode.GetXmlQualifiedName(elementType)
+        //    match x with 
+        //    | FsTypeCodeEx.Option (elementTpCode, elementType) ->
+        //        elementTpCode.GetXmlQualifiedName(elementType)
                 
-            | FsTypeCodeEx.CollectionType collectionType -> 
-                let name = "ArrayOf" + getName_InLoop collectionType.ElementType
-                XmlQualifiedName(name)
+        //    | FsTypeCodeEx.CollectionType collectionType -> 
+        //        let name = "ArrayOf" + getName_InLoop collectionType.ElementType
+        //        XmlQualifiedName(name)
 
-            | FsTypeCodeEx.DictionaryType dictType -> 
-                let name = "DictOf__" + getName_InLoop dictType.KeyType + "_" + getName_InLoop dictType.ValueType
+        //    | FsTypeCodeEx.DictionaryType dictType -> 
+        //        let name = "DictOf__" + getName_InLoop dictType.KeyType + "_" + getName_InLoop dictType.ValueType
                     
-                XmlQualifiedName(name)
+        //        XmlQualifiedName(name)
 
-            | FsTypeCodeEx.FsTypeCode fsTypeCode ->
-                match fsTypeCode with
-                | FsTypeCode.Object _
-                | FsTypeCode.Enum -> XmlQualifiedName(tp.Name)
-                | FsTypeCode.ValueType tpCode ->
-                    let tpName = x.ValueTypeCodeToXmlTypeName(tpCode)
-                    XmlQualifiedName(tpName, W3XMLSchema)
+        //    | FsTypeCodeEx.FsTypeCode fsTypeCode ->
+        //        match fsTypeCode with
+        //        | FsTypeCode.Object _
+        //        | FsTypeCode.Enum -> XmlQualifiedName(tp.Name)
+        //        | FsTypeCode.ValueType tpCode ->
+        //            let tpName = FsTypeCodeEx.ValueTypeCodeToXmlTypeName(tpCode)
+        //            XmlQualifiedName(tpName, W3XMLSchema)
 
-            | FsTypeCodeEx.Tuple tupleTypes ->
-                let name = 
-                    tupleTypes
-                    |> Array.map(fun (elementTpCode, elementType) ->
-                        elementTpCode.GetXmlQualifiedName(elementType).Name
-                    )
-                    |> String.concat "_"
+        //    | FsTypeCodeEx.Tuple tupleTypes ->
+        //        let name = 
+        //            tupleTypes
+        //            |> Array.map(fun (elementTpCode, elementType) ->
+        //                elementTpCode.GetXmlQualifiedName(elementType).Name
+        //            )
+        //            |> String.concat "_"
 
-                "tuple" + (tupleTypes.Length.ToString()) + "__" + name
-                |> XmlQualifiedName
+        //        "tuple" + (tupleTypes.Length.ToString()) + "__" + name
+        //        |> XmlQualifiedName
 
-        member x.GetElementName(tp: Type): string =
+        //member x.GetElementName(tp: Type): string =
 
-            let getName_InLoop(tp: Type) =
-                (getFsTpCodeEx(tp)).GetElementName(tp)
+        //    let getName_InLoop(tp: Type) =
+        //        (getFsTpCodeEx(tp)).GetElementName(tp)
 
-            match x with 
-            | FsTypeCodeEx.Option (elementTpCode, elementType) ->
-                elementTpCode.GetElementName(elementType)
+        //    match x with 
+        //    | FsTypeCodeEx.Option (elementTpCode, elementType) ->
+        //        elementTpCode.GetElementName(elementType)
                 
-            | FsTypeCodeEx.CollectionType collectionType -> 
-                "ArrayOf" + getName_InLoop collectionType.ElementType
+        //    | FsTypeCodeEx.CollectionType collectionType -> 
+        //        "ArrayOf" + getName_InLoop collectionType.ElementType
 
-            | FsTypeCodeEx.DictionaryType dictType -> 
-                "DictOf__" + getName_InLoop dictType.KeyType + "_" + getName_InLoop dictType.ValueType
+        //    | FsTypeCodeEx.DictionaryType dictType -> 
+        //        "DictOf__" + getName_InLoop dictType.KeyType + "_" + getName_InLoop dictType.ValueType
                     
 
-            | FsTypeCodeEx.FsTypeCode fsTypeCode ->
-                match fsTypeCode with
-                | FsTypeCode.Object _
-                | FsTypeCode.Enum -> tp.Name
-                | FsTypeCode.ValueType tpCode -> 
-                    x.ValueTypeCodeToXmlTypeName(tpCode)
-                    |> toTitleCase
+        //    | FsTypeCodeEx.FsTypeCode fsTypeCode ->
+        //        match fsTypeCode with
+        //        | FsTypeCode.Object _
+        //        | FsTypeCode.Enum -> tp.Name
+        //        | FsTypeCode.ValueType tpCode -> 
+        //            FsTypeCodeEx.ValueTypeCodeToXmlTypeName(tpCode)
+        //            |> toTitleCase
 
 
-            | FsTypeCodeEx.Tuple tupleTypes ->
-                "Tuple" + tupleTypes.Length.ToString()
+        //    | FsTypeCodeEx.Tuple tupleTypes ->
+        //        "Tuple" + tupleTypes.Length.ToString()
               
 
-    type CollectionType with 
-        member x.TypeName =
-            FsTypeCodeEx.CollectionType(x).GetXmlQualifiedName(x.ElementType).Name
+    //type CollectionType with 
+    //    member x.TypeName =
+    //        FsTypeCodeEx.CollectionType(x).GetXmlQualifiedName(x.ElementType).Name
 
-    type DictionaryType with 
-        member x.TypeName =
-            FsTypeCodeEx.DictionaryType(x).GetXmlQualifiedName(x.KeyType).Name
+    //type DictionaryType with 
+    //    member x.TypeName =
+    //        FsTypeCodeEx.DictionaryType(x).GetXmlQualifiedName(x.KeyType).Name
 
-        member x.EntryTypeName =
-            x.TypeName.Replace("Dictionary__", "Entry__")
+    //    member x.EntryTypeName =
+    //        x.TypeName.Replace("Dictionary__", "Entry__")
                 
 
 
 
 
 
-    type Type with 
-        member tp.GetXmlQualifiedName() =
-            (getFsTpCodeEx tp).GetXmlQualifiedName(tp)
+    //type Type with 
+    //    member tp.GetXmlQualifiedName() =
+    //        (getFsTpCodeEx tp).GetXmlQualifiedName(tp)
           
-        member tp.GetElementName() =
-            (getFsTpCodeEx tp).GetElementName(tp)
+    //    member tp.GetElementName() =
+    //        (getFsTpCodeEx tp).GetElementName(tp)
           
     
-    [<RequireQualifiedAccess>]
-    type SCasablePropertyType =
-        | OneFieldSCase of PropertyInfo
-        | PropertyInfo of PropertyInfo
-        | Type of Type
-        | NamedType of string * Type
-        | NillableNamedType of string * Type
-    with 
+    //[<RequireQualifiedAccess>]
+    //type SCasablePropertyType =
+    //    | OneFieldSCase of Type
+    //    | PropertyInfo of PropertyInfo
+    //    | Type of Type
+    //    | NamedType of string * Type
+    //    | NillableNamedType of string * Type
+    //with 
 
-        member x.Name =
-            match x with 
-            | OneFieldSCase v -> "SCase"
-            | PropertyInfo v -> v.Name
-            | Type v -> v.GetElementName()
-            | NamedType (name, _) -> name
-            | NillableNamedType (name, _) -> name
+    //    member x.Name =
+    //        match x with 
+    //        | OneFieldSCase v -> "SCase"
+    //        | PropertyInfo v -> v.Name
+    //        | Type v -> v.GetElementName()
+    //        | NamedType (name, _) -> name
+    //        | NillableNamedType (name, _) -> name
 
-        member x.Nillable =
-            match x with 
-            | OneFieldSCase _
-            | PropertyInfo _
-            | Type _
-            | NamedType _ -> false
-            | NillableNamedType _ -> true
+    //    member x.Nillable =
+    //        match x with 
+    //        | OneFieldSCase _
+    //        | PropertyInfo _
+    //        | Type _
+    //        | NamedType _ -> false
+    //        | NillableNamedType _ -> true
     
-        //member private x.Value =
-        //    match x with 
-        //    | OneFieldSCase v 
-        //    | PropertyInfo v -> v
+    //    //member private x.Value =
+    //    //    match x with 
+    //    //    | OneFieldSCase v 
+    //    //    | PropertyInfo v -> v
     
-        member x.PropertyType = 
-            match x with 
-            | OneFieldSCase v 
-            | PropertyInfo v -> v.PropertyType
-            | Type tp -> tp
-            | NamedType (_, tp) 
-            | NillableNamedType (_, tp) -> tp
+    //    member x.PropertyType = 
+    //        match x with 
+    //        | PropertyInfo v -> v.PropertyType
+    //        | OneFieldSCase tp 
+    //        | Type tp 
+    //        | NamedType (_, tp) 
+    //        | NillableNamedType (_, tp) -> tp
             
-        member x.ToNamedType() =
-            match x with 
-            | Type(_) -> x
-            | NamedType _
-            | NillableNamedType _ -> x
-            | _ ->
-                let tp = x.PropertyType
-                let tpCode = getFsTpCodeEx(tp)
-                match tpCode with 
-                | FsTypeCodeEx.Option _ -> 
-                    NillableNamedType(x.Name, tp)
-                | _ -> x
+    //    member x.ToNamedType() =
+    //        match x with 
+    //        | Type(_) -> x
+    //        | NamedType _
+    //        | NillableNamedType _ -> x
+    //        | _ ->
+    //            let tp = x.PropertyType
+    //            let tpCode = getFsTpCodeEx(tp)
+    //            match tpCode with 
+    //            | FsTypeCodeEx.Option _ -> 
+    //                NillableNamedType(x.Name, tp)
+    //            | _ -> x
 
-        member x.ToNamedTypeWith(tp: Type) =
-            match x with 
-            | Type (_) -> Type(tp)
-            | NamedType (name, _) -> NamedType(name, tp)
-            | NillableNamedType (name, _) -> NillableNamedType(name, tp)
-            | _ ->
-                let tpCode = getFsTpCodeEx(tp)
-                match tpCode with 
-                | FsTypeCodeEx.Option _ -> 
-                    NillableNamedType(x.Name, tp)
-                | _ -> NamedType(x.Name, tp)
+    //    member x.ToNamedTypeWith(tp: Type) =
+    //        match x with 
+    //        | Type (_) -> Type(tp)
+    //        | NamedType (name, _) -> NamedType(name, tp)
+    //        | NillableNamedType (name, _) -> NillableNamedType(name, tp)
+    //        | _ ->
+    //            let tpCode = getFsTpCodeEx(tp)
+    //            match tpCode with 
+    //            | FsTypeCodeEx.Option _ -> 
+    //                NillableNamedType(x.Name, tp)
+    //            | _ -> NamedType(x.Name, tp)
 
-        static member CreateNamedType(name, tp: Type) =
-            let tpCode = getFsTpCodeEx(tp)
-            match tpCode with 
-            | FsTypeCodeEx.Option _ -> 
-                NillableNamedType(name, tp)
-            | _ -> NamedType(name, tp)
+    //    static member CreateNamedType(name, tp: Type) =
+    //        let tpCode = getFsTpCodeEx(tp)
+    //        match tpCode with 
+    //        | FsTypeCodeEx.Option _ -> 
+    //            NillableNamedType(name, tp)
+    //        | _ -> NamedType(name, tp)
 
-    type SCasablePropertyType with 
-        member x.GenerateElement() =
-            let name = x.Name
-            let propTP = x.PropertyType
+    //type SCasablePropertyType with 
+    //    member x.GenerateElement() =
+    //        let name = x.Name
+    //        let propTP = x.PropertyType
 
-            let x = x.ToNamedType()
-            match x with 
-            | SCasablePropertyType.NillableNamedType _ ->
-                XmlSchemaElement(
-                    Name = name,
-                    SchemaTypeName = propTP.GetXmlQualifiedName(),
-                    IsNillable = true
-                )
+    //        let x = x.ToNamedType()
+    //        match x with 
+    //        | SCasablePropertyType.NillableNamedType _ ->
+    //            XmlSchemaElement(
+    //                Name = name,
+    //                SchemaTypeName = propTP.GetXmlQualifiedName(),
+    //                IsNillable = true
+    //            )
 
-            | _ ->
+    //        | _ ->
 
-                XmlSchemaElement(
-                    Name = name,
-                    SchemaTypeName = propTP.GetXmlQualifiedName()
-                )
+    //            XmlSchemaElement(
+    //                Name = name,
+    //                SchemaTypeName = propTP.GetXmlQualifiedName()
+    //            )
 
 
 
@@ -926,7 +930,7 @@ module private _Util2 =
     //    )
 
     let private updateSCasablePropertyType_Cache = ConcurrentDictionary()
-    let private updateSCasablePropertyType_Cache__NoUpdateForWrappedTypeName = ConcurrentDictionary()
+    //let private updateSCasablePropertyType_Cache__NoUpdateForWrappedTypeName = ConcurrentDictionary()
 
 
     type FsXmlSerializerTypeMappingPair =
@@ -1027,45 +1031,45 @@ module private _Util2 =
                 x.UpdateType_ToXml_Op_Ex_Private(tp)
             )
 
-        member private x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Choice(tp: Type) =
-            updateSCasablePropertyType_Cache__NoUpdateForWrappedTypeName.GetOrAdd(tp, valueFactory = fun _ ->
-                let newTp = x.UpdateType_ToXml_Op_Ex_Private__NoUpdateForWrappedTypeName(tp)
-                match newTp with 
-                | None -> None, tp, tp.GetXmlQualifiedName()
-                | Some newTp -> Some 0, newTp, newTp.GetXmlQualifiedName()
-            )
+        //member private x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Choice(tp: Type) =
+        //    updateSCasablePropertyType_Cache__NoUpdateForWrappedTypeName.GetOrAdd(tp, valueFactory = fun _ ->
+        //        let newTp = x.UpdateType_ToXml_Op_Ex_Private__NoUpdateForWrappedTypeName(tp)
+        //        match newTp with 
+        //        | None -> None, tp, tp.GetXmlQualifiedName()
+        //        | Some newTp -> Some 0, newTp, newTp.GetXmlQualifiedName()
+        //    )
 
-        member private x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName(tp: Type) =
-            let (_, a, b) = x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Choice(tp)
-            a, b
+        //member private x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName(tp: Type) =
+        //    let (_, a, b) = x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Choice(tp)
+        //    a, b
 
-        member private x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Op(tp: Type) =
-            let (code, a, b) = x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Choice(tp)
-            match code with 
-            | None -> None
-            | Some _ -> Some (a, b) 
+        //member private x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Op(tp: Type) =
+        //    let (code, a, b) = x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Choice(tp)
+        //    match code with 
+        //    | None -> None
+        //    | Some _ -> Some (a, b) 
 
-        member private x.CreateNamedTp(tp: SCasablePropertyType, newTp) =
-            let tp = 
-                match tp with 
-                | SCasablePropertyType.Type _ -> SCasablePropertyType.Type newTp
-                | _ -> tp
+        //member private x.CreateNamedTp(tp: SCasablePropertyType, newTp) =
+        //    let tp = 
+        //        match tp with 
+        //        | SCasablePropertyType.Type _ -> SCasablePropertyType.Type newTp
+        //        | _ -> tp
 
-            tp.ToNamedTypeWith(newTp)
+        //    tp.ToNamedTypeWith(newTp)
                 
 
-        member private x.UpdateSCasablePropertyType_ToXml_Ex(tp: SCasablePropertyType) =
-            match x.UpdateType_ToXml_Op_Ex(tp.PropertyType) with 
-            | None -> tp
-            | Some newTp ->
-                x.CreateNamedTp(tp, newTp)
+        //member private x.UpdateSCasablePropertyType_ToXml_Ex(tp: SCasablePropertyType) =
+        //    match x.UpdateType_ToXml_Op_Ex(tp.PropertyType) with 
+        //    | None -> tp
+        //    | Some newTp ->
+        //        x.CreateNamedTp(tp, newTp)
               
 
-        member internal x.UpdateSCasablePropertyTypeAndValue_ToXml(tp: SCasablePropertyType, value: obj) =
-            match x.UpdateTypeAndValue_ToXml(tp.PropertyType, value) with 
-            | None -> x.UpdateSCasablePropertyType_ToXml_Ex tp, value
-            | Some (newTp, newValue) ->
-                x.CreateNamedTp(tp, newTp), newValue
+        //member internal x.UpdateSCasablePropertyTypeAndValue_ToXml(tp: SCasablePropertyType, value: obj) =
+        //    match x.UpdateTypeAndValue_ToXml(tp.PropertyType, value) with 
+        //    | None -> x.UpdateSCasablePropertyType_ToXml_Ex tp, value
+        //    | Some (newTp, newValue) ->
+        //        x.CreateNamedTp(tp, newTp), newValue
 
 
 
@@ -1074,20 +1078,20 @@ module private _Util2 =
             | None -> tp
             | Some tp -> tp
 
-        member internal x.UpdateType_ToXml_Ex__NoUpdateForWrappedTypeName(tp: Type) =
-            x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName(tp) 
+        //member internal x.UpdateType_ToXml_Ex__NoUpdateForWrappedTypeName(tp: Type) =
+        //    x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName(tp) 
 
-        member internal x.UpdateSCasablePropertyType_ToXml(tp: SCasablePropertyType) =
-            match x.UpdateType_ToXml_Op_Ex (tp.PropertyType) with 
-            | None -> tp
-            | Some newTp ->
-                x.CreateNamedTp(tp, newTp)
+        //member internal x.UpdateSCasablePropertyType_ToXml(tp: SCasablePropertyType) =
+        //    match x.UpdateType_ToXml_Op_Ex (tp.PropertyType) with 
+        //    | None -> tp
+        //    | Some newTp ->
+        //        x.CreateNamedTp(tp, newTp)
 
-        member internal x.UpdateSCasablePropertyType_ToXml__NoUpdateForWrappedTypeName(tp: SCasablePropertyType) =
-            match x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Op (tp.PropertyType) with 
-            | None -> tp
-            | Some (newTp, _) ->
-                x.CreateNamedTp(tp, newTp)
+        //member internal x.UpdateSCasablePropertyType_ToXml__NoUpdateForWrappedTypeName(tp: SCasablePropertyType) =
+        //    match x.UpdateType_ToXml_Op_Ex__NoUpdateForWrappedTypeName_Op (tp.PropertyType) with 
+        //    | None -> tp
+        //    | Some (newTp, _) ->
+        //        x.CreateNamedTp(tp, newTp)
                 
         member internal x.TryGetTypeMapping(tp: Type) =
             match x.TypeMapping.TryGetValue (tp) with 
@@ -1099,48 +1103,48 @@ module private _Util2 =
 
 
 
-        member internal x.UpdateSCasablePropertyType_ToXml_Op(tp: SCasablePropertyType) =
-            match x.TypeMapping.TryGetValue (tp.PropertyType) with 
-            | false, _ -> None
-            | true, typeMapping ->
-                let newTp = 
-                    x.CreateNamedTp(tp, typeMapping.TargetType)
+        //member internal x.UpdateSCasablePropertyType_ToXml_Op(tp: SCasablePropertyType) =
+        //    match x.TypeMapping.TryGetValue (tp.PropertyType) with 
+        //    | false, _ -> None
+        //    | true, typeMapping ->
+        //        let newTp = 
+        //            x.CreateNamedTp(tp, typeMapping.TargetType)
 
-                {|
-                    PropertyType = newTp
-                    TypeMapping = typeMapping
-                |}
+        //        {|
+        //            PropertyType = newTp
+        //            TypeMapping = typeMapping
+        //        |}
                 
-                |> Some
+        //        |> Some
 
 
-    type SCasablePropertyTypeWithTypeMapping =
-        { SCasablePropertyType : SCasablePropertyType 
-          TypeMapping: option<FsXmlSerializerTypeMappingPair>
-          Type__NoUpdateForWrappedType: Type
-          Type__NoUpdateForWrappedTypeName: XmlQualifiedName }
+    //type SCasablePropertyTypeWithTypeMapping =
+    //    { SCasablePropertyType : SCasablePropertyType 
+    //      TypeMapping: option<FsXmlSerializerTypeMappingPair>
+    //      Type__NoUpdateForWrappedType: Type
+    //      Type__NoUpdateForWrappedTypeName: XmlQualifiedName }
 
-    with 
-        member x.GenerateElement() =
-            let element = x.SCasablePropertyType.GenerateElement()
+    //with 
+    //    member x.GenerateElement() =
+    //        let element = x.SCasablePropertyType.GenerateElement()
 
-            element.SchemaTypeName <- x.Type__NoUpdateForWrappedTypeName
-            element
+    //        element.SchemaTypeName <- x.Type__NoUpdateForWrappedTypeName
+    //        element
 
 
-        static member CreateNamedType(name: string, tp: Type, configuration: FsXmlSerializerConfiguration) =
-            let newTp = configuration.UpdateType_ToXml_Ex tp
-            let tpMapping = 
-                configuration.TryGetTypeMapping tp
+    //    static member CreateNamedType(name: string, tp: Type, configuration: FsXmlSerializerConfiguration) =
+    //        let newTp = configuration.UpdateType_ToXml_Ex tp
+    //        let tpMapping = 
+    //            configuration.TryGetTypeMapping tp
 
-            let newTp_NoUpdateForWrappedTypeName, newTpName = 
-                configuration.UpdateType_ToXml_Ex__NoUpdateForWrappedTypeName tp
+    //        let newTp_NoUpdateForWrappedTypeName, newTpName = 
+    //            configuration.UpdateType_ToXml_Ex__NoUpdateForWrappedTypeName tp
 
-            { SCasablePropertyType = SCasablePropertyType.CreateNamedType(name, newTp)
-              TypeMapping = tpMapping
-              Type__NoUpdateForWrappedType = newTp_NoUpdateForWrappedTypeName
-              Type__NoUpdateForWrappedTypeName = newTpName
-              }
+    //        { SCasablePropertyType = SCasablePropertyType.CreateNamedType(name, newTp)
+    //          TypeMapping = tpMapping
+    //          Type__NoUpdateForWrappedType = newTp_NoUpdateForWrappedTypeName
+    //          Type__NoUpdateForWrappedTypeName = newTpName
+    //          }
 
 
 

@@ -15,57 +15,42 @@ open System.Xml
 open System.Xml.Schema
 
 
+open FsSchemaTypesAST
 
 type private IndexedXmlSchemaType =
     { Index: int 
-      XmlSchemaType: XmlSchemaType }
+      XmlSchemaType: FsSchemaType }
 
 type private TypeElementsCache() =
     let tpNames = HashSet()
-    let cache = ConcurrentDictionary<Type, IndexedXmlSchemaType option>()
-    //let unionCasesCache = ConcurrentDictionary<Type * string, XmlSchemaComplexType>()
+    let cache = ConcurrentDictionary<Type, IndexedXmlSchemaType>()
 
     member x.TryGet(tp: Type) =
         match cache.TryGetValue(tp) with 
-        | true, v -> v
+        | true, v -> Some v
         | false, _ -> None
+
+    member x.Add(tp, schemaType) =
+        let index = cache.Count
+        let indexedType =
+            { Index = index 
+              XmlSchemaType = schemaType }
+
+        cache.TryAdd(tp, indexedType)
+        |> ignore
 
     member x.GetOrAdd(tp, valueFactory) =
         let index = cache.Count
         cache.GetOrAdd(tp, valueFactory = fun tp ->
-            let tpName_titleCase = tp.GetXmlQualifiedName().Name |> toTitleCase
-            match tpNames.Contains tpName_titleCase with 
-            | true -> failwithf "Duplicate type Name %s is not supported" tpName_titleCase
+            match tpNames.Contains tp with 
+            | true -> failwithf "Duplicate type Name %A is not supported" tp
             | false -> 
-                tpNames.Add(tpName_titleCase)
+                tpNames.Add(tp)
                 |> ignore
             { Index = index 
               XmlSchemaType = valueFactory tp }
-            |> Some
-        )
-        |> Option.get
-
-    member x.GetOrAddOp(tp, valueFactory) =
-        let index = cache.Count
-        cache.GetOrAdd(tp, valueFactory = fun tp ->
-            let tpName_titleCase = tp.GetXmlQualifiedName().Name |> toTitleCase
-            match tpNames.Contains tpName_titleCase with 
-            | true -> failwithf "Duplicate type Name %s is not supported" tpName_titleCase
-            | false -> 
-                tpNames.Add(tpName_titleCase)
-                |> ignore
-
-            let xmlSchemaType = valueFactory tp
-            match xmlSchemaType with 
-            | None -> None
-            | Some xmlSchemaType ->
-                { Index = index 
-                  XmlSchemaType = xmlSchemaType }
-                |> Some
         )
 
-    //member x.GetOrAddUci(uci: UnionCaseInfo, valueFactory) =
-    //    unionCasesCache.GetOrAdd((uci.DeclaringType, uci.Name), valueFactory = valueFactory)
 
     member x.Count = cache.Count
 
@@ -74,6 +59,8 @@ type private TypeElementsCache() =
     member x.Values = cache.Values
 
     member x.Keys = cache.Keys
+
+    member x.Pairs = List.ofSeq cache
 
 
 
@@ -128,568 +115,133 @@ module private XmlSchemaElement =
             )
 
 
-module rec FsSchemaTypes =
-    [<RequireQualifiedAccess>]
-    type FsSchemaTypeOrSchemaTypeName =
-        | SchemaType of FsSchemaType
-        | SchemaTypeName of XmlQualifiedName
 
-    type FsXmlSchemaElement =
-        { IsOption: bool 
-          Name: string 
-          SchemaTypeOrSchemaTypeName: FsSchemaTypeOrSchemaTypeName
-          }
-    with 
-        member x.ToSchema() =
-            let name = x.Name
-            let element = 
-                match x.IsOption with 
-                | true ->
-                    XmlSchemaElement(
-                        Name = name,
-                        IsNillable = true
-                    )
-
-                | _ ->
-                    XmlSchemaElement(
-                        Name = name
-                    )
-
-            match x.SchemaTypeOrSchemaTypeName with 
-            | FsSchemaTypeOrSchemaTypeName.SchemaTypeName tpName -> 
-                element.SchemaTypeName <- tpName
-                element
-            | FsSchemaTypeOrSchemaTypeName.SchemaType tp ->
-                element.SchemaType <- tp.ToSchema()
-                element
-
-
-    type FsSchemaComplexType_Tuple =
-        { Elements: FsXmlSchemaElement list
-          TypeCode: array<FsTypeCodeEx * Type>
-        }
-    with 
-        member x.Name =
-            "Tuple" + x.Elements.Length.ToString()
- 
-        member x.ToSchema() =
-            let tuplePropSequence =
-                let propSequence = 
-                    XmlSchemaSequence()
-
-                for element in x.Elements do
-                    let element = element.ToSchema()
-                    propSequence.Items.Add(element)
-                    |> ignore
-                
-                propSequence
-
-
-            let innerType = 
-                XmlSchemaComplexType(
-                    Particle = tuplePropSequence
-                )
-            
-            innerType
-
-
-    type FsSchemaComplexType_Entry =
-        { KeyElement: XmlSchemaElement
-          ValueElement: XmlSchemaElement
-          TypeCode: DictionaryType
-        }
-    with 
-        member x.EntryName = x.TypeCode.EntryTypeName
-    
-    type FsSchemaComplexType_Dictionary =
-        { Entry: FsSchemaComplexType_Entry
-          TypeCode: DictionaryType
-        }
-    with
-        member x.TypeName = x.TypeCode.TypeName
-
-
-
-    type FsSchemaComplexType_Collection =
-        { Entry: FsSchemaComplexType_Entry
-          TypeCode: CollectionType
-          ElementTypeOrTypeName: FsSchemaTypeOrSchemaTypeName
-        }
-    with
-        member x.TypeName = x.TypeCode.TypeName
-            
-
-    [<RequireQualifiedAccess>]
-    type FsSchemaComplexType =
-        | Tuple of FsSchemaComplexType_Tuple
-        | Dictionary of DictionaryType
-        | Collection of CollectionType
-        | Union of UnionCaseInfo list
-        | SinglecaseUnion of UnionCaseInfo
-    
-
-
-    [<RequireQualifiedAccess>]
-    type FsSchemaSimpleType =
-        | EnumType of Type
-        | ValueType of Type
-
-    [<RequireQualifiedAccess>]
-    type FsSchemaType =
-        | FsSchemaComplexType of FsSchemaComplexType
-        | Option of FsSchemaType
-        | SimpleType of FsSchemaSimpleType
-        | WrapOldType of oldType: Type * FsSchemaType
-    with 
-        member x.ToSchema() =
-            failwith ""
 
 type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
     
     member private x.TpToXmlSchemaObject(tp: Type): XmlSchemaObject list =
-        let createXmlSchemaSequence(props: SCasablePropertyType []) =
-            let propSequence = 
-                XmlSchemaSequence()
-
-            for prop in props do
-                let element = prop.GenerateElement()
-                propSequence.Items.Add(element)
-                |> ignore
-            
-            propSequence
-
-        let createXmlSchemaSequence_WithTypeMapping(props: SCasablePropertyTypeWithTypeMapping []) =
-            let propSequence = 
-                XmlSchemaSequence()
-
-            for prop in props do
-                let element = prop.GenerateElement()
-                propSequence.Items.Add(element)
-                |> ignore
-            
-            propSequence
-
-
         let typeElements = TypeElementsCache()
-        let rec loop isOption (tp0: Type) =
-            configuration.AddTypeMappingByType(tp0)
-            let configuration = configuration
-            let tpMapping = configuration.TryGetTypeMapping tp0
-            match tpMapping with 
-            | None -> ()
-            | Some tpMapping ->
-                configuration.AddTypeMappingByType(tpMapping.TypeMapping.TargetType)
+        let rec loop (tp: Type) =
+            match typeElements.TryGet tp with 
+            | None ->
+                let r(tp: Type) = 
+                    let tpCode = getFsTpCodeEx (tp)
 
-
-            let tryWrapOldName_TypeMapping(f) =
-                match tpMapping with 
-                | None -> f WrapOldNameEnum.UsingCurrentName
-                | Some tpMapping ->
-                    match tpMapping.TypeMapping.WrapOldName with 
-                    | false -> f WrapOldNameEnum.UsingCurrentName
-                    | true ->
-                        let schemaType: XmlSchemaComplexType = f WrapOldNameEnum.WrapOldName
-                        schemaType.Name <- null
-                        let element = 
-                            XmlSchemaElement.create_isOption isOption tpMapping.OriginType.Name schemaType
-
-                        let propSequence = 
-                            let sequence = XmlSchemaSequence()
-                            sequence.Items.Add(element) |> ignore
-                            sequence
-
-                        XmlSchemaComplexType(
-                            Name = tpMapping.OriginType.Name,
-                            Particle = propSequence
-                        )
-
-            let tp0 = 
-                configuration.UpdateType_ToXml_Ex__NoUpdateForWrappedTypeName(tp0)
-                |> fst
-
-            let tp = 
-                match tpMapping with 
-                | None -> tp0
-
-                | Some tpMapping ->
-                    tpMapping.TypeMapping.TargetType
-
-            let tpCode = getFsTpCodeEx (tp)
-            let getTuplePropSequence(tpCodes: array<FsTypeCodeEx * Type>) =
-                let propTypes = 
-                    tpCodes
-                    |> Array.mapi(fun i (_, tp) -> 
-                        SCasablePropertyType.CreateNamedType(itemText i, tp)
-                    )
-                createXmlSchemaSequence propTypes
-
-            match tpCode with 
-
-            | FsTypeCodeEx.Tuple (tpCodes) ->
-                let r = 
-                    typeElements.GetOrAdd(tp0, valueFactory = fun _ -> 
-                        tryWrapOldName_TypeMapping(fun enumValue ->
-                            let innerType = 
-                                let propSequence = getTuplePropSequence(tpCodes)
-
-                                XmlSchemaComplexType(
-                                    Particle = propSequence
+                    let r = 
+                        match tpCode with 
+                        | FsTypeCodeEx.Tuple (tpCodes) ->
+                            let children = 
+                                tpCodes
+                                |> List.ofArray
+                                |> List.map(fun (_, tp) ->
+                                    loop tp
                                 )
-                        
-                            let element = 
-                                let name = "Tuple" + tpCodes.Length.ToString()
-                                match enumValue with 
-                                | WrapOldNameEnum.WrapOldName ->
-                                    XmlSchemaElement(
-                                        Name = name,
-                                        SchemaType = innerType
-                                    )
-
-                                | WrapOldNameEnum.UsingCurrentName ->
-                                    XmlSchemaElement.create_isOption isOption name innerType 
-
-                            let propSequence = 
-                                let sequence = XmlSchemaSequence()
-                                sequence.Items.Add(element) |> ignore
-                                sequence
-
-                            XmlSchemaComplexType(
-                                Name = tp.GetXmlQualifiedName().Name,
-                                Particle = propSequence
-                            )
-                        )
-
-                    )
-
-
-                for (tpCode, tp) in tpCodes do
-                    loop false tp
-                    |> ignore
-                r
-
-            | FsTypeCodeEx.Option (elementTpCode, elementTp) ->
-                loop true elementTp
-
-            | FsTypeCodeEx.DictionaryType dictionaryType ->
-                let keyType = dictionaryType.KeyType
-                let valueType = dictionaryType.ValueType
-
-                let arrayTpName = dictionaryType.TypeName
-                let entryTpName = dictionaryType.EntryTypeName
-                typeElements.GetOrAdd(tp, valueFactory = fun _ ->
-                    let propSequence = 
-                        XmlSchemaSequence()
-
-                    propSequence.Items.Add(
-                        XmlSchemaElement(
-                            MinOccurs = 0,
-                            MaxOccursString = "unbounded",
-                            Name = "Entry",
-                            SchemaTypeName = XmlQualifiedName(entryTpName)
-                        )
-                    )   
-                    |> ignore
-
-                    XmlSchemaComplexType(
-                        Name = arrayTpName,
-                        Particle = propSequence
-                    )
-
-                )
-                |> ignore
-
-                let entryType = Entry.makeEntryGenericType dictionaryType
-                typeElements.GetOrAdd(entryType, fun _ ->
-                    let propSequence = 
-                        createXmlSchemaSequence     
-                            [|SCasablePropertyType.CreateNamedType ("Key", keyType);
-                              SCasablePropertyType.CreateNamedType ("Value", valueType) |]
-
-                    let content = 
-                        XmlSchemaComplexContent(
-                            Content = 
-                                XmlSchemaComplexContentExtension(
-                                    BaseTypeName = XmlQualifiedName("Entry"),
-                                    Particle = propSequence
-                                )
-                        )
-
-                    XmlSchemaComplexType(
-                        Name = entryTpName,
-                        ContentModel = content
-                    )
-                )
-                |> ignore
-
-                loop false keyType
-                loop false valueType
                 
-            | FsTypeCodeEx.CollectionType collectionType -> 
-                let elementType = collectionType.ElementType
+                            FsSchemaComplexType_Tuple.Create(tp, tpCodes, children)
+                            |> FsSchemaComplexGenericType.Tuple
+                            |> FsSchemaComplexType.Generic
+                            |> FsSchemaType.ComplexType
 
 
-                typeElements.GetOrAdd(tp, valueFactory = fun _ ->
-                    let arrayTpName = collectionType.TypeName
-                    let propSequence = 
-                        XmlSchemaSequence()
+                        | FsTypeCodeEx.Option (elementTpCode, elementTp) ->
+                            loop elementTp
+                            |> FsSchemaType.Option
 
-                    let elementTypeName = 
+                        | FsTypeCodeEx.DictionaryType dictionaryType ->
+                            let keySchemaType = loop dictionaryType.KeyType
+                            let valueSchemaType = loop dictionaryType.ValueType
 
-
-                        match getFsTpCodeEx elementType with 
-                        | FsTypeCodeEx.Tuple tpCodes ->
-                            let propSequence = getTuplePropSequence(tpCodes)
-                                
-                            XmlSchemaComplexType(
-                                Particle = propSequence
-                            )
-                            |> Choice1Of2
-
-                        | _ -> Choice2Of2 (elementType.GetXmlQualifiedName())
-
-                    let element = 
-
-                        match elementTypeName with 
-                        | Choice1Of2 tupleType ->
-                            XmlSchemaElement(
-                                MinOccurs = 0,
-                                MaxOccursString = "unbounded",
-                                Name = elementType.GetElementName(),
-                                SchemaType = tupleType
-                            )
-                            
-                        | Choice2Of2 elementTypeName -> 
-                            XmlSchemaElement(
-                                MinOccurs = 0,
-                                MaxOccursString = "unbounded",
-                                Name = elementType.GetElementName(),
-                                SchemaTypeName = elementTypeName
-                            )
-
-
-
-                    propSequence.Items.Add(
-                        element
-                    )   
-                    |> ignore
-
-                    XmlSchemaComplexType(
-                        Name = arrayTpName,
-                        Particle = propSequence
-                    )
-
-                )
-                |> ignore
-
-                loop false elementType
-
-            | FsTypeCodeEx.FsTypeCode tpCode ->
-
-                match tpCode with 
-                | FsTypeCode.Enum ->
-                    let enumTp = 
-                        typeElements.GetOrAdd(tp, valueFactory = fun _ -> 
-                            let content = 
-                                XmlSchemaSimpleTypeRestriction(
-                                    BaseTypeName = new XmlQualifiedName("string", W3XMLSchema)
-                                )
-
-                            for enumName in System.Enum.GetNames(tp) do
-                                content.Facets.Add(
-                                    XmlSchemaEnumerationFacet(
-                                        Value = enumName
-                                    )
-                                )
-                                |> ignore
-
-                            XmlSchemaSimpleType(
-                                Name = tp.Name,
-                                Content = content
-                            )
-                        )
-
-                    match tpMapping with 
-                    | None -> ()
-                    | Some tpMapping -> 
-                        match tpMapping.TypeMapping.WrapOldName with 
-                        | true -> 
-                            let content = 
-                                XmlSchemaSimpleTypeRestriction(
-                                    BaseTypeName = new XmlQualifiedName(enumTp.XmlSchemaType.Name)
-                                )
-                           
-                            typeElements.GetOrAdd(tp0, valueFactory = fun _ ->
-                                XmlSchemaSimpleType(
-                                    Name = tpMapping.OriginType.GetXmlQualifiedName().Name,
-                                    Content = content
-                                )
-                            )
-                            |> ignore
-
-
-                        | false -> ()
-
-                    ()
+                            FsSchemaComplexType_Dictionary.Create(dictionaryType, keySchemaType, valueSchemaType)
+                            |> FsSchemaComplexGenericType.Dictionary
+                            |> FsSchemaComplexType.Generic
+                            |> FsSchemaType.ComplexType
 
                 
-                | FsTypeCode.ValueType tpCode -> 
-                    match tpMapping with 
-                    | None -> 
-                        typeElements.GetOrAddOp(tp0, valueFactory = fun _ -> None)
-                        |> ignore
+                        | FsTypeCodeEx.CollectionType collectionType -> 
+                            let elementSchemaType = loop collectionType.ElementType
+                            FsSchemaComplexType_Collection.Create(collectionType, elementSchemaType)
+                            |> FsSchemaComplexGenericType.Collection
+                            |> FsSchemaComplexType.Generic
+                            |> FsSchemaType.ComplexType
 
-                    | Some tpMapping -> 
-                        match tpMapping.TypeMapping.WrapOldName with 
-                        | true -> 
-                           
-                            typeElements.GetOrAdd(tp0, valueFactory = fun _ ->
-                                let content = 
-                                    XmlSchemaSimpleTypeRestriction(
-                                        BaseTypeName = tp.GetXmlQualifiedName()
-                                    )
-                                XmlSchemaSimpleType(
-                                    Name = tpMapping.OriginType.GetXmlQualifiedName().Name,
-                                    Content = content
-                                )
-                            )
-                            |> ignore
+                        | FsTypeCodeEx.FsTypeCode tpCode ->
 
+                            match tpCode with 
+                            | FsTypeCode.Enum ->
+                                FsSchemaSimpleType_Enum tp
+                                |> FsSchemaSimpleType.EnumType 
+                                |> FsSchemaType.SimpleType
 
-                        | false -> ()
-
-                | FsTypeCode.Object fsObjectTypeCode ->   
-
+                
+                            | FsTypeCode.ValueType tpCode -> 
+                                tpCode
+                                |> FsSchemaSimpleType_Value
+                                |> FsSchemaSimpleType.ValueType
+                                |> FsSchemaType.SimpleType
+                  
+                            | FsTypeCode.Object fsObjectTypeCode ->   
                     
-                    match fsObjectTypeCode with 
-                    | FsObjectTypeCode.FsXmlSerializableTypeMapping ->
-                        match tpMapping with 
-                        | None -> 
-                            failwithf "Invalid token, using FsXmlSerializableTypeMapping instead"
-                            ()
+                                match fsObjectTypeCode with 
+                                | FsObjectTypeCode.FsXmlSerializableTypeMapping ->
+                                    failwithf "Invalid token, using FsXmlSerializableTypeMapping instead"
+                      
 
+                                | FsObjectTypeCode.Record ->
 
-                        | Some tpMapping ->
-                            let rec loop2 (tpMapping: FsXmlSerializerTypeMappingPair) tp = 
-                                loop false tp
-                                let element = typeElements.TryGet(tp)
-                                match element with 
-                                | None -> 
-                                    let targetType = tpMapping.TypeMapping.TargetType
-                                    match configuration.TryGetTypeMapping tpMapping.TypeMapping.TargetType with 
-                                    | None -> tpMapping.TypeMapping.TargetType
-                                    | Some tpMapping2 ->
-                                        loop2 tpMapping2 targetType
-                                | Some _ -> failwithf ""
+                                    let props = 
+                                        FSharpType.GetRecordFields tp
+                                        |> List.ofArray
 
-                            let finalTargetType = loop2 tpMapping tp
-                            let r = 
-                                typeElements.GetOrAdd(tp0, valueFactory = fun _ ->
-                                    let content = 
-                                        XmlSchemaSimpleTypeRestriction(
-                                            BaseTypeName = tp.GetXmlQualifiedName()
+                                    let elements, schemaTypes = 
+                                        props
+                                        |> List.map(fun prop ->
+                                            let propTp = prop.PropertyType 
+                                            let schemaType = loop propTp
+                                            let element = 
+                                                schemaType.GenerateFsElement(Some prop.Name)
+
+                                            (element, schemaType)
                                         )
+                                        |> List.unzip
 
-                                    XmlSchemaSimpleType(
-                                        Name = finalTargetType.GetXmlQualifiedName().Name,
-                                        Content = content
-                                    )
-                                )
+                                    { FsSchemaComplexType_Record.Elements = elements 
+                                      ElementSchemaTypes = schemaTypes
+                                      PropertyInfos = props
+                                      Type = tp }
+                                    |> FsSchemaComplexType.Record
+                                    |> FsSchemaType.ComplexType
 
-                            ()
+                                | FsObjectTypeCode.SingletonCaseUnion ucase ->
+                                    let fields = ucase.GetFields()
 
+                                    match fields with 
+                                    | [||] -> failwithf "Not implemented"
+                                    | [|field|] ->  
+                                        let fieldSchemaType = loop field.PropertyType
+                                        FsSchemaComplexType_SingleCaseUnion_OneField.Create(ucase, tp, field, fieldSchemaType)
+                                        |> FsSchemaComplexType_SingleCaseUnion.OneField
+                                        |> FsSchemaComplexType.SinglecaseUnion
+                                        |> FsSchemaType.ComplexType
 
-                    | FsObjectTypeCode.Record ->
+                                    | fields -> 
+                                        let fields = List.ofSeq fields
 
-                        let props = 
-                            FSharpType.GetRecordFields tp
-                            |> Array.map(fun prop ->
-                                let propTp = prop.PropertyType |> configuration.UpdateType_ToXml_Ex 
-                                SCasablePropertyType.CreateNamedType(prop.Name, propTp)
-                            )
-
-                        typeElements.GetOrAdd(tp, valueFactory = fun _ ->
-                            let propSequence = createXmlSchemaSequence props
-
-                            XmlSchemaComplexType(
-                                Name = tp.Name,
-                                Particle = propSequence
-                            )
-
-                        )
-                        |> ignore
-
-                        for prop in props do 
-                            let propTp = prop.PropertyType
-                            match typeElements.ContainsKey propTp with 
-                            | true -> ()
-                            | false -> loop false propTp
-
-                    | FsObjectTypeCode.SingletonCaseUnion ucase ->
-                        let fields = ucase.GetFields()
-
-
-
-                        typeElements.GetOrAdd(tp, valueFactory = fun _ ->
-
-                            match fields with 
-                            | [||] -> failwithf "Not implemented"
-                            | [|field|] ->  
-                                let propSequence = createXmlSchemaSequence [|SCasablePropertyType.OneFieldSCase field|]
-                                XmlSchemaComplexType(
-                                    Name = tp.Name,
-                                    Particle = propSequence
-                                )
-
-                            | fields -> 
-                                let innerType = 
-                                    let propSequence = 
-                                        let propTypes = 
+                                        let fieldSchemaTypes =
                                             fields
-                                            |> Array.map(fun m -> 
-                                                SCasablePropertyType.PropertyInfo m
-                                            )
-                                        createXmlSchemaSequence propTypes
-
-                                    XmlSchemaComplexType(
-                                        Particle = propSequence
-                                    )
+                                            |> List.map(fun field -> loop field.PropertyType)
 
 
-                                let element = 
-                                    XmlSchemaElement(
-                                        Name = "SCase",
-                                        SchemaType = innerType
-                                    )
+                                        FsSchemaComplexType_SingleCaseUnion_MultipleFields.Create(ucase, tp, fields, fieldSchemaTypes)
+                                        |> FsSchemaComplexType_SingleCaseUnion.MultipleFields
+                                        |> FsSchemaComplexType.SinglecaseUnion
+                                        |> FsSchemaType.ComplexType
 
-                                let propSequence = 
-                                    let sequence = XmlSchemaSequence()
-                                    sequence.Items.Add(element) |> ignore
-                                    sequence
+                                | FsObjectTypeCode.Union cases ->
 
-                                XmlSchemaComplexType(
-                                    Name = tp.Name,
-                                    Particle = propSequence
-                                )
-
-                        )
-                        |> ignore
-
-                        for field in fields do 
-                            let propTp = field.PropertyType
-                            match typeElements.ContainsKey propTp with 
-                            | true -> ()
-                            | false -> loop false propTp
-
-
-                    | FsObjectTypeCode.Union cases ->
-                        typeElements.GetOrAdd(tp, valueFactory = fun _ ->   
-
-                            let propChoice = 
-                                let choice = XmlSchemaChoice()
-                                let elements = 
-                                    cases
-                                    |> Array.map(fun case ->
-                                        let innerType = 
+                                    let elements = 
+                                        cases
+                                        |> List.ofArray
+                                        |> List.map(fun case ->
                                             let fields = case.GetFields()
                                             let caseName = case.Name
                                             let tpName = tp.Name + "_" + case.Name.ToLower() + "Case"
@@ -698,90 +250,67 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
 
                                             match fields with 
                                             | [||] -> 
-                                                XmlQualifiedName("string", W3XMLSchema)
-                                                |> Choice1Of3
+                                                FsSchemaComplexType_Union_NamedCase.Create(case)
+                                                |> FsSchemaComplexType_UnionCase.NamedCase
                                             | [|field|] -> 
-                                                let propType =
-                                                    SCasablePropertyTypeWithTypeMapping.CreateNamedType(
-                                                        case.Name,
-                                                        field.PropertyType,
-                                                        configuration
-                                                    )
-
-                                                (propType)
-                                                |> Choice2Of3
+                                                let fieldSchemaType = loop field.PropertyType
+                                                FsSchemaComplexType_Union_OneFieldCase.Create(
+                                                    case,
+                                                    field,
+                                                    fieldSchemaType
+                                                )
+                                                |> FsSchemaComplexType_UnionCase.OneFieldCase
 
                                             | fields ->
-                                                let propSequence = 
-                                                    let propTypes = 
-                                                        fields
-                                                        |> Array.map(fun m -> 
-                                                            SCasablePropertyTypeWithTypeMapping.CreateNamedType(
-                                                                m.Name,
-                                                                m.PropertyType,
-                                                                configuration
-                                                            )
-                                                        )
-                                                    createXmlSchemaSequence_WithTypeMapping propTypes
-                                            
-                                                XmlSchemaComplexType(
-                                                    Particle = propSequence
+                                                let fields = List.ofSeq fields
+
+                                                let fieldSchemaTypes = 
+                                                    fields
+                                                    |> List.map(fun field -> loop field.PropertyType)
+                                        
+                                                FsSchemaComplexType_Union_MultipleFieldsCase.Create(
+                                                    case,
+                                                    fields,
+                                                    fieldSchemaTypes
                                                 )
-                                                |> Choice3Of3
+                                                |> FsSchemaComplexType_UnionCase.MultipleFieldsCase
 
-                                        let tpName = tp.Name + "_" + case.Name.ToLower() + "Case"
-                                        match innerType with 
-                                        | Choice1Of3 name ->
-                                            XmlSchemaElement(
-                                                Name = case.Name,
-                                                SchemaTypeName = name
-                                            )
+                                        )
 
-                                        | Choice2Of3 (propInfo) ->
-                                            let element = propInfo.GenerateElement()
-                                            element
+                                    { UnionCases = elements 
+                                      Type = tp }
+                                    |> FsSchemaComplexType.Union
+                                    |> FsSchemaType.ComplexType
 
-                                        | Choice3Of3 innerType ->
-                                            XmlSchemaElement(
-                                                Name = case.Name,
-                                                SchemaType = innerType
-                                            )
-                                    )
+                    typeElements.Add(tp, r)
+                
+                    r
 
-                                for element in elements do
-                                    choice.Items.Add(element) |> ignore
+                let configuration = configuration
+                configuration.AddTypeMappingByType(tp)
+                let tpMapping = configuration.TryGetTypeMapping(tp)
+                match tpMapping with 
+                | None -> r(tp)
+                | Some tpMapping -> 
+                    match tpMapping.TypeMapping.WrapOldName with 
+                    | false -> 
+                        let schemaType = r(tpMapping.TypeMapping.TargetType)
+                        typeElements.Add(tp, schemaType)
+                        schemaType
 
-                                choice
+                    | true -> failwithf "Not implemented"
 
-                            let union = 
-                                let sequence = XmlSchemaSequence()
-                                let element = XmlSchemaElement(
-                                    Name = "Choice" + cases.Length.ToString(),
-                                    SchemaType = XmlSchemaComplexType(Particle = propChoice)
-                                )
-                                sequence.Items.Add element |> ignore
-                                sequence
+            | Some v -> v.XmlSchemaType
 
-                            XmlSchemaComplexType(
-                                Name = tp.Name,
-                                Particle = union
-                            )
-                        )
-                        |> ignore
-
-
-                        for case in cases do 
-                            let fields = case.GetFields()
-                            for field in fields do 
-                                let propTp = field.PropertyType
-                                match typeElements.ContainsKey propTp with 
-                                | true -> ()
-                                | false -> loop false propTp
-
-
-
-        loop false tp
+        loop tp
         |> ignore
+
+        let __updateConfiguration_schemaTypesCache =
+            let cache = configuration.FsSchemaTypeCache
+            cache.Clear()
+            for pair in typeElements.Pairs do
+                cache.TryAdd(pair.Key, pair.Value.XmlSchemaType)
+                |> ignore
 
         let rootElement = 
             
@@ -790,10 +319,10 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
                 SchemaTypeName = new XmlQualifiedName(tp.Name)
             )
 
-        let entryType =
-            XmlSchemaComplexType(
-                Name = "Entry"
-            )
+        //let entryType =
+        //    XmlSchemaComplexType(
+        //        Name = "Entry"
+        //    )
 
         let scaseType =
             XmlSchemaComplexType(
@@ -803,11 +332,15 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
         let typeElements = 
             typeElements.Values
             |> List.ofSeq
-            |> List.choose id
             |> List.sortBy(fun m -> m.Index)
-            |> List.map(fun m -> m.XmlSchemaType :> XmlSchemaObject)
+            |> List.collect(fun m -> 
+                match m.XmlSchemaType with 
+                | FsSchemaType.ComplexType(FsSchemaComplexType.Generic _) -> []
+                | _ -> m.XmlSchemaType.ToSchemas()
+            )
+            |> List.map(fun m -> m :> XmlSchemaObject)
 
-        rootElement :: typeElements @ [entryType; scaseType]
+        rootElement :: typeElements @ [(*entryType; *)scaseType]
 
     member x.ImportTp(tp: Type) =
         let xmlSchema = XmlSchema(ElementFormDefault = XmlSchemaForm.Qualified)

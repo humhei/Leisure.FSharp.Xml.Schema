@@ -5,7 +5,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Types.fs" />
+    <Compile Include="AST.fs" />
     <Compile Include="FsSchemaImporter.fs" />
+    <Compile Include="Serialize.fs" />
+    <Compile Include="Deserialize.fs" />
     <Compile Include="FsXml.fs" />
   </ItemGroup>
   <ItemGroup>
