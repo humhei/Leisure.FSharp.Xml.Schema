@@ -125,15 +125,15 @@ type POCOBase<'T when 'T : equality and 'T : comparison> (pocoKey: 'T) =
     //    static member SchemaType() = typeof<'T>
 
 
-    //interface FsIXmlSerializableTypeMapping<POCOBase<'T>, 'T> with
-    //    member __.OfXml(tp: Type, v): POCOBase<'T> = 
-    //        let ctr = POCOBase<'T>.GetCtr(tp)
-    //        ctr.Invoke([|v|])
-    //        |> unbox<_>
+    interface FsIXmlSerializableTypeMapping<POCOBase<'T>, 'T> with
+        member __.OfXml(tp: Type, v): POCOBase<'T> = 
+            let ctr = POCOBase<'T>.GetCtr(tp)
+            ctr.Invoke([|v|])
+            |> unbox<_>
 
-    //    member x.ToXml() = pocoKey
+        member x.ToXml() = pocoKey
             
-    //    member x.WrapOldName = true
+        member x.WrapOldName = true
 
     interface System.IComparable with 
         member x.CompareTo(y: obj) =

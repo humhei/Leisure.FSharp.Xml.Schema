@@ -117,7 +117,7 @@ module internal rec FsSchemaTypesAST =
     type FsSchemaComplexType_Tuple =
         { Elements: FsXmlSchemaElement list
           ElementSchemaTypes: FsSchemaType list
-          TypeCode: array<FsTypeCodeEx * Type>
+          //TypeCode: array<FsTypeCodeEx * Type>
           Tp: Type
         }
     with 
@@ -153,12 +153,10 @@ module internal rec FsSchemaTypesAST =
             )
 
 
-        static member Create(tp: Type, tpCodes: array<FsTypeCodeEx * Type>, elementSchemaTypes) =
+        static member Create(tp: Type, elementSchemaTypes) =
             let elements = 
-                tpCodes
-                |> List.ofArray
-                |> List.zip elementSchemaTypes
-                |> List.mapi(fun i (fsSchemaType: FsSchemaType, _) -> 
+                elementSchemaTypes
+                |> List.mapi(fun i (fsSchemaType: FsSchemaType) -> 
                     fsSchemaType.GenerateFsElement(Some (itemText i))
                     //SCasablePropertyType.CreateNamedType_Schema(itemText i, fsSchemaType)
                 )
@@ -166,7 +164,7 @@ module internal rec FsSchemaTypesAST =
 
             { Elements = elements
               ElementSchemaTypes = elementSchemaTypes
-              TypeCode = tpCodes
+              //TypeCode = tpCodes
               Tp = tp}
 
         member x.GetSchemaTypeOrSchemaTypeName(): FsSchemaTypeOrSchemaTypeName =
@@ -745,18 +743,78 @@ module internal rec FsSchemaTypesAST =
             | ValueType _ -> None
 
 
+    type MappedFsSchemaType =
+        { FsSchemaType: FsSchemaType
+          TypeMappingPair: LinkableFsXmlSerializerTypeMappingPair }
+    with 
+        //member x.TypeMapping = x.TypeMappingPair.TypeMapping
+
+        member x.WrapOldName = x.TypeMappingPair.WrapOldName
+
+        member x.OriginType = x.TypeMappingPair.OriginType
+
+
+        member x.GetElementName() = 
+            match x.WrapOldName with 
+            | false -> x.FsSchemaType.GetElementName()
+            | true -> x.OriginType.Name
+
+        member x.GetSchemaTypeOrSchemaTypeName() =
+            match x.WrapOldName with 
+            | false -> x.FsSchemaType.GetSchemaTypeOrSchemaTypeName()
+            | true -> 
+                x.OriginType.Name
+                |> XmlQualifiedName
+                |> FsSchemaTypeOrSchemaTypeName.SchemaTypeName
+
+
+        member x.ToSchemas() =
+            match x.WrapOldName with 
+            | false -> x.FsSchemaType.ToSchemas()
+            | true -> 
+                let innerSchemas = x.FsSchemaType.GetSchemaTypeOrSchemaTypeName()
+                let originTpName = x.GetElementName()
+
+                let fsSchemaElement = 
+                    {
+                        Name = PropNameOrElementName.PropName (originTpName)
+                        IsOption = false
+                        SchemaTypeOrSchemaTypeName = innerSchemas
+                    }
+
+                let element = fsSchemaElement.ToSchema()
+                let propSequence = 
+                    XmlSchemaSequence()
+
+                propSequence.Items.Add(element)
+                |> ignore
+
+                let schemaType = 
+                    XmlSchemaComplexType(
+                        Name = originTpName,
+                        Particle = propSequence
+                    ) :> XmlSchemaType
+
+                schemaType
+                |> List.singleton
+                //failwithf "Not implemented"
 
     [<RequireQualifiedAccess>]
     type FsSchemaType =
         | ComplexType of FsSchemaComplexType
         | Option of FsSchemaType
         | SimpleType of FsSchemaSimpleType
+        | MappedType of MappedFsSchemaType
     with 
         member x.GetAsGeneric() =
             match x with 
             | SimpleType _ -> None
             | Option v -> v.GetAsGeneric()
             | ComplexType v -> v.GetAsGeneric()
+            | MappedType (v) -> 
+                match v.WrapOldName with 
+                | true -> None
+                | false -> v.FsSchemaType.GetAsGeneric() 
 
         member x.ToSchemas(): XmlSchemaType list =
             match x with 
@@ -768,12 +826,14 @@ module internal rec FsSchemaTypesAST =
                     m :> XmlSchemaType
                 )
 
+            | MappedType (v) -> v.ToSchemas() 
 
         member x.GetElementName(): string = 
             match x with 
             | SimpleType tp -> tp.GetElementName()
             | ComplexType tp -> tp.GetElementName()
             | Option tp -> tp.GetElementName()
+            | MappedType (tp) -> tp.GetElementName()
 
 
         member x.GetSchemaTypeOrSchemaTypeName(): FsSchemaTypeOrSchemaTypeName = 
@@ -781,7 +841,7 @@ module internal rec FsSchemaTypesAST =
             | SimpleType tp -> tp.GetSchemaTypeOrSchemaTypeName()
             | ComplexType tp -> tp.GetSchemaTypeOrSchemaTypeName()
             | Option tp -> tp.GetSchemaTypeOrSchemaTypeName()
-            | _ -> failwithf "Not implementp"
+            | MappedType (tp) -> tp.GetSchemaTypeOrSchemaTypeName()
 
 
         member x.GenerateFsElement(propName: string option): FsXmlSchemaElement =   
@@ -839,7 +899,7 @@ module internal rec FsSchemaTypesAST =
 
     [<RequireQualifiedAccess>]
     module NamedFsSchemaType =
-        let internal (|ElementName_AND_Tuple2|Tuple|Others|) (x: NamedFsSchemaType) =
+        let internal (|ElementName_AND_Tuple2|Others|) (x: NamedFsSchemaType) =
             let schemaTypeOrSchemaTypeName = x.FsSchemaType.GetSchemaTypeOrSchemaTypeName()
             let name = 
                 match x.Name with 
@@ -851,12 +911,13 @@ module internal rec FsSchemaTypesAST =
             match (name, schemaTypeOrSchemaTypeName) with 
             | ElementName_AND_Tuple (tpType, name) -> ElementName_AND_Tuple2(tpType, name)
             | _ -> 
-                match schemaTypeOrSchemaTypeName with 
-                | FsSchemaTypeOrSchemaTypeName.SchemaType schemaTp ->
-                    match schemaTp.GetAsGeneric() with 
-                    | Some (FsSchemaComplexGenericType.Tuple v) ->
-                        Tuple(v)
+                Others
+                //match schemaTypeOrSchemaTypeName with 
+                //| FsSchemaTypeOrSchemaTypeName.SchemaType schemaTp ->
+                //    match schemaTp.GetAsGeneric() with 
+                //    | Some (FsSchemaComplexGenericType.Tuple v) ->
+                //        Tuple(v)
 
-                    | _ -> Others
+                //    | _ -> Others
 
-                | _ -> Others
+                //| _ -> Others

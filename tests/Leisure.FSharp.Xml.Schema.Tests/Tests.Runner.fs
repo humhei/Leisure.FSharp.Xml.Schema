@@ -15,5 +15,7 @@ let allTests =
     ]
 
 [<EntryPoint>]
-let main argv = runTests testConfig allTests
+let main argv = 
+    runTests testConfig allTests
+    System.Console.Read()
  

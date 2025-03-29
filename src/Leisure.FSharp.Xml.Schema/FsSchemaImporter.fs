@@ -129,21 +129,26 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
 
                     let r = 
                         match tpCode with 
-                        | FsTypeCodeEx.Tuple (tpCodes) ->
+                        | FsTypeCodeEx.Tuple (tps) ->
                             let children = 
-                                tpCodes
+                                tps
                                 |> List.ofArray
-                                |> List.map(fun (_, tp) ->
+                                |> List.map(fun (tp) ->
                                     loop tp
                                 )
-                
-                            FsSchemaComplexType_Tuple.Create(tp, tpCodes, children)
+
+                            //let tpCodes: FsSchemaType list =
+                            //    tps
+                            //    |> Array.map loop
+                            //    |> List.ofArray
+
+                            FsSchemaComplexType_Tuple.Create(tp, children)
                             |> FsSchemaComplexGenericType.Tuple
                             |> FsSchemaComplexType.Generic
                             |> FsSchemaType.ComplexType
 
 
-                        | FsTypeCodeEx.Option (elementTpCode, elementTp) ->
+                        | FsTypeCodeEx.Option (elementTp) ->
                             loop elementTp
                             |> FsSchemaType.Option
 
@@ -183,7 +188,7 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
                     
                                 match fsObjectTypeCode with 
                                 | FsObjectTypeCode.FsXmlSerializableTypeMapping ->
-                                    failwithf "Invalid token, using FsXmlSerializableTypeMapping instead"
+                                    failwithf "Invalid token, using FsXmlSerializableTypeMapping to instead %A" tp
                       
 
                                 | FsObjectTypeCode.Record ->
@@ -292,13 +297,17 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
                 match tpMapping with 
                 | None -> r(tp)
                 | Some tpMapping -> 
-                    match tpMapping.TypeMapping.WrapOldName with 
-                    | false -> 
-                        let schemaType = r(tpMapping.TypeMapping.TargetType)
-                        typeElements.Add(tp, schemaType)
-                        schemaType
+                    let schemaType = r(tpMapping.TargetType)
+                    let schemaType =
+                        { 
+                            TypeMappingPair = tpMapping
+                            FsSchemaType = schemaType
+                        }
+                        |> FsSchemaType.MappedType
 
-                    | true -> failwithf "Not implemented"
+                    typeElements.Add(tp, schemaType)
+                    schemaType
+
 
             | Some v -> v.XmlSchemaType
 
@@ -335,8 +344,13 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
             |> List.sortBy(fun m -> m.Index)
             |> List.collect(fun m -> 
                 match m.XmlSchemaType with 
-                | FsSchemaType.ComplexType(FsSchemaComplexType.Generic _) -> []
-                | _ -> m.XmlSchemaType.ToSchemas()
+                | FsSchemaType.Option _ -> []
+                | _ ->
+                    match m.XmlSchemaType.GetAsGeneric() with 
+                    | Some _ -> []
+                    | _ ->
+                        let r = m.XmlSchemaType.ToSchemas()
+                        r
             )
             |> List.map(fun m -> m :> XmlSchemaObject)
 

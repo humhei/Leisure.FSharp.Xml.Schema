@@ -154,7 +154,7 @@ module internal rec _DeserializePart =
             r
 
     type FsSchemaComplexType_Tuple with 
-        member x.ReadValue(reader: XmlReader) =     
+        member x.ReadValue_InElement(reader: XmlReader) =     
             let tupleElements = ResizeArray()
 
             advanceReaderFullElement(reader, fun _ ->
@@ -171,6 +171,21 @@ module internal rec _DeserializePart =
 
             FSharpValue.MakeTuple(Array.ofSeq tupleElements, x.Tp)
 
+        member x.ReadValue(reader: XmlReader) =     
+            let tupleElements = ResizeArray()
+
+            advanceReaderFullElement(reader, fun _ ->
+                advanceReaderFullElement(reader, fun _ ->
+                    let i = tupleElements.Count
+                    let (tp) = x.ElementSchemaTypes.[i]
+                    let value = tp.ReadValue(reader)
+                    tupleElements.Add(value)
+                )
+                |> ignore
+            )   
+            |> ignore
+
+            FSharpValue.MakeTuple(Array.ofSeq tupleElements, x.Tp)
 
     type FsSchemaComplexGenericType with 
         member x.ReadValue(reader: XmlReader) =
@@ -189,7 +204,13 @@ module internal rec _DeserializePart =
             advanceReaderFullElement(reader, fun stack ->
                 x.Zip3()
                 |> List.iter(fun (element, schemaType, propInfo) ->
-                    let value = schemaType.ReadValue(reader)
+                    let namedSchemaType =
+                        { Name = Some (propInfo.Name)
+                          FsSchemaType = schemaType }
+
+                    let value = namedSchemaType.ReadValue(reader)
+
+                    //let value = schemaType.ReadValue(reader)
                     props.Add(value)
                 )
             )
@@ -287,6 +308,31 @@ module internal rec _DeserializePart =
 
             | _ -> failwithf "Not implemented"
 
+    type MappedFsSchemaType with 
+        member x.ReadValue(reader: XmlReader) =
+            match x.WrapOldName with 
+            | false -> 
+                let value = x.FsSchemaType.ReadValue(reader)
+                x.TypeMappingPair.OfXmlSerializable value
+
+            | true -> 
+                //let namedSchemaType = 
+                //    { Name = Some x.OriginType.Name 
+                //      FsSchemaType = x.FsSchemaType }
+
+                //let value = namedSchemaType.ReadValue(reader)
+
+                let value =
+                    advanceReaderFullElement_GetElement(reader, fun _ ->
+                        x.FsSchemaType.ReadValue(reader)
+                    )
+
+
+                let r = 
+                    x.TypeMappingPair.OfXmlSerializable value
+
+                r
+
 
     type FsSchemaType with 
         member x.ReadValue(reader: XmlReader) =
@@ -321,6 +367,10 @@ module internal rec _DeserializePart =
                 //let r = makeOption(propTp, elementType, elementValue)
                 //r
 
+            | FsSchemaType.MappedType (v) ->
+                let value = v.ReadValue(reader)
+                value
+
             | _ -> failwithf "Not implemented"
 
 
@@ -331,16 +381,7 @@ module internal rec _DeserializePart =
             | XmlNodeType.Element ->
                 match x with 
                 | NamedFsSchemaType.ElementName_AND_Tuple2(tupleTp, name) ->
-                    x.FsSchemaType.ReadValue(reader)
-
-                | NamedFsSchemaType.Tuple(tupleTp) ->
-                    let mutable value = None
-                    advanceReaderFullElement(reader, fun _ ->
-                        value <- Some(x.FsSchemaType.ReadValue(reader))
-                    )
-                    |> ignore
-
-                    value.Value
+                    tupleTp.ReadValue_InElement(reader)
 
                 | _ ->
                     let r = x.FsSchemaType.ReadValue(reader)

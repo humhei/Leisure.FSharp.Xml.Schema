@@ -127,33 +127,6 @@ module internal rec _SerializePart =
            
     type FsSchemaComplexType_Tuple with 
         member x.WriteValue(writer: XmlWriter, value: obj) =  
-            //    let inCollection = defaultArg inCollection false
-            //    let ignorePropInCollection(f) =
-            //        let f() =   
-            //            tryWrapOldName_TypeMapping(f)
-
-            //        match inCollection with 
-            //        | false -> 
-            //            writer.WriteStartElement(prop.Name)
-            //            f()
-            //            writer.WriteFullEndElement()
-
-            //        | true -> f()
-
-            //    ignorePropInCollection(fun () ->
-            //        writer.WriteStartElement("Tuple" + tpCodes.Length.ToString())
-
-            //        let tupleElements =
-            //            FSharpValue.GetTupleFields(propValue)
-
-            //        (tpCodes, tupleElements)
-            //        ||> Array.iteri2(fun i (tpCode, tp) tupleElement ->
-            //            let name = itemText i
-            //            FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.NamedType(name, tp), tupleElement, configuration)
-            //        )
-
-            //        writer.WriteFullEndElement()
-            //    )
             writer.WriteStartElement("Tuple" + x.Elements.Length.ToString())
 
             let tupleElements =
@@ -292,6 +265,20 @@ module internal rec _SerializePart =
             | _ -> failwithf "Not implemented"
 
 
+    type MappedFsSchemaType with 
+        member x.WriteValue(writer: XmlWriter, value: obj) =
+            match x.WrapOldName with 
+            | false -> 
+                let value = x.TypeMappingPair.ToXmlSerializable value
+                x.FsSchemaType.WriteValue(writer, value)
+
+            | true -> 
+                writer.WriteStartElement(x.GetElementName())
+                let value = x.TypeMappingPair.ToXmlSerializable value
+                x.FsSchemaType.WriteValue(writer, value)
+                writer.WriteFullEndElement()
+                
+
     type FsSchemaType with 
         member x.WriteValue(writer: XmlWriter, value: obj) =
             match x with 
@@ -307,6 +294,9 @@ module internal rec _SerializePart =
                     let valueProp = propValue.GetType().GetProperty("Value")
                     let propValue = valueProp.GetValue(propValue)
                     v.WriteValue(writer, propValue)
+
+            | FsSchemaType.MappedType(v) ->
+                v.WriteValue(writer, value)
 
             | _ -> failwithf "Not implemented"
 

@@ -331,7 +331,7 @@ module GeneralRecordWithUnion =
         static member SampleData =
             { OriginKnownColor = KnownColor.Black 
               TargetKnownColor = KnownColor.Red
-              Tolerance = Tolerance.ByTupleList([(Some 6, 6); (None, 3)]) }
+              Tolerance = Tolerance.ByValue 10 }
 
 
 
@@ -372,20 +372,23 @@ module GeneralRecordWithCustomMapping =
 
 
     type InnerTolerance =
-        { Tolerance: Tolerance }
+        { ToleranceValueProp: Tolerance }
 
     type ColorMapping_XMLSchema =
         { OriginColor: KnownColor
           TargetColor: KnownColor
-          //Tolerance: InnerTolerance list
-          Tolerance: ToleranceValue
+          Tolerance: Tolerance
+          //Tolerance: ToleranceValue
           //ColorSpace: ColorSpace
         }
 
     type ColorMapping =
         { OriginKnownColor: KnownColor
           TargetKnownColor: KnownColor
-          Tolerance: ToleranceValue
+
+
+          Tolerance: Tolerance
+          //Tolerance: ToleranceValue
           //ColorSpace: ColorSpace
         }
     with 
@@ -426,9 +429,19 @@ module GeneralRecordWithCustomMapping =
             { OriginKnownColor = KnownColor.Black 
               TargetKnownColor = KnownColor.Red
               Tolerance = 
-                ToleranceValue.Create(5, 6)
+                //Some (
+                //    (ToleranceValue.Create (6, 6))
+                //)
                 //[
-                //    { Tolerance =
+                //    {
+                //        ToleranceValueProp = ToleranceValue.Create(5, 6)
+                //    }
+                //]
+                //Tolerance.ByValuesOption (None, Some (ToleranceValue.Create (6, 6)))
+                Tolerance.ByValue  (ToleranceValue.Create (6, 6))
+                //ToleranceValue.Create(5, 6)
+                //[
+                //    { ToleranceValueProp =
                 //        Tolerance.ByValuesOption (None, Some (ToleranceValue.Create (6, 6)))
                 //    }
                 //]
@@ -446,7 +459,7 @@ module GeneralRecordWithSkipComparasion =
 
     type Record =
         { (*DecimalSelector: SkipComparation_Serializable<DecimalSelector>*)
-          ProductName: ProductName }
+          ProductNameProp: ProductName }
     with 
         static member SampleData =
             let decimalSelector = 
@@ -454,7 +467,7 @@ module GeneralRecordWithSkipComparasion =
                 |> SkipComparation_Serializable
 
             { (*DecimalSelector = decimalSelector*)
-              ProductName = ProductName("ProductName")}
+              ProductNameProp = ProductName("MyProductName")}
 
 let pass() = Expect.isTrue true "passed"
 let fail() = Expect.isTrue false "failed"
@@ -556,7 +569,7 @@ let MyTests =
       | true -> pass()
       | false -> fail()
 
-    ftestCase "IXmlSerializable general Record with custom mapping" <| fun _ ->
+    testCase "IXmlSerializable general Record with custom mapping" <| fun _ ->
       let fileID = 7
       let xmlFile = sprintf @"xml\%d.xml" fileID
       let xsdFile = sprintf @"xml\%d.xsd" fileID 
@@ -564,7 +577,8 @@ let MyTests =
       let config = 
         FsXmlSerializerConfiguration.DefaultValue.AddTypeMapping<GeneralRecordWithCustomMapping.ToleranceValue, float * float>(
             toXml = (fun m -> m.Value),
-            ofXml = (fun m -> GeneralRecordWithCustomMapping.ToleranceValue.Create(6, 6))
+            ofXml = (fun (a, b) -> GeneralRecordWithCustomMapping.ToleranceValue.Create(a, b)),
+            wrapOldName = true
         )
 
       let data = GeneralRecordWithCustomMapping.ColorMapping.SampleData
@@ -590,7 +604,7 @@ let MyTests =
       | true -> pass()
       | false -> fail()
 
-    testCase "IXmlSerializable general Record with SkipComparasion" <| fun _ ->
+    ftestCase "IXmlSerializable general Record with SkipComparasion" <| fun _ ->
       let fileID = 9
       let xmlFile = sprintf @"xml\%d.xml" fileID
       let xsdFile = sprintf @"xml\%d.xsd" fileID
