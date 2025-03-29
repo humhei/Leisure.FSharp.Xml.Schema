@@ -604,7 +604,7 @@ let MyTests =
       | true -> pass()
       | false -> fail()
 
-    ftestCase "IXmlSerializable general Record with SkipComparasion" <| fun _ ->
+    testCase "IXmlSerializable general Record with SkipComparasion" <| fun _ ->
       let fileID = 9
       let xmlFile = sprintf @"xml\%d.xml" fileID
       let xsdFile = sprintf @"xml\%d.xsd" fileID
