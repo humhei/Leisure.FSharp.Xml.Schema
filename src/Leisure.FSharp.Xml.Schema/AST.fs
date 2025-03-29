@@ -749,21 +749,21 @@ module internal rec FsSchemaTypesAST =
     with 
         //member x.TypeMapping = x.TypeMappingPair.TypeMapping
 
+
+        //member x.OriginType = x.TypeMappingPair.OriginType
+
         member x.WrapOldName = x.TypeMappingPair.WrapOldName
 
-        member x.OriginType = x.TypeMappingPair.OriginType
-
-
         member x.GetElementName() = 
-            match x.WrapOldName with 
-            | false -> x.FsSchemaType.GetElementName()
-            | true -> x.OriginType.Name
+            match x.TypeMappingPair.FirstNamedType() with 
+            | None -> x.FsSchemaType.GetElementName()
+            | Some v -> v.Name
 
         member x.GetSchemaTypeOrSchemaTypeName() =
             match x.WrapOldName with 
             | false -> x.FsSchemaType.GetSchemaTypeOrSchemaTypeName()
             | true -> 
-                x.OriginType.Name
+                x.GetElementName()
                 |> XmlQualifiedName
                 |> FsSchemaTypeOrSchemaTypeName.SchemaTypeName
 

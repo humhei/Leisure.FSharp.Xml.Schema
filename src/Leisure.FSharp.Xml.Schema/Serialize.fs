@@ -273,7 +273,8 @@ module internal rec _SerializePart =
                 x.FsSchemaType.WriteValue(writer, value)
 
             | true -> 
-                writer.WriteStartElement(x.GetElementName())
+                let elementName = x.GetElementName()
+                writer.WriteStartElement(elementName)
                 let value = x.TypeMappingPair.ToXmlSerializable value
                 x.FsSchemaType.WriteValue(writer, value)
                 writer.WriteFullEndElement()

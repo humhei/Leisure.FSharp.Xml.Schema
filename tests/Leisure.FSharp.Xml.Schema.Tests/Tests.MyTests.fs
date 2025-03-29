@@ -458,7 +458,7 @@ module GeneralRecordWithSkipComparasion =
         | True
 
     type Record =
-        { (*DecimalSelector: SkipComparation_Serializable<DecimalSelector>*)
+        { DecimalSelector: SkipComparation_Serializable<ProductName>
           ProductNameProp: ProductName }
     with 
         static member SampleData =
@@ -466,7 +466,10 @@ module GeneralRecordWithSkipComparasion =
                 DecimalSelector.BiggerOrEqual(100.)
                 |> SkipComparation_Serializable
 
-            { (*DecimalSelector = decimalSelector*)
+            { DecimalSelector = 
+                //decimalSelector
+                SkipComparation_Serializable(ProductName("NestProductName"))
+
               ProductNameProp = ProductName("MyProductName")}
 
 let pass() = Expect.isTrue true "passed"

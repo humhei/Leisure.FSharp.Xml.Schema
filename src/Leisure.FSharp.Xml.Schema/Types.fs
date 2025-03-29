@@ -929,6 +929,7 @@ with
         | EndPoint v -> v.WrapOldName
         | Linked (m, v) -> m.WrapOldName || v.WrapOldName
 
+
     member x.OfXmlSerializable(value: obj) =
         match x with 
         | EndPoint v -> v.OfXmlSerializable value
@@ -947,6 +948,19 @@ and LinkableFsXmlSerializerTypeMappingPair =
     { OriginType: Type 
       LinkableTypeMapping: LinkableFsXmlSerializerTypeMapping }
 with 
+    member internal x.FirstNamedType() = 
+        match x.LinkableTypeMapping with 
+        | LinkableFsXmlSerializerTypeMapping.EndPoint v ->
+            match v.WrapOldName with 
+            | true -> Some x.OriginType
+            | false -> None
+
+        | LinkableFsXmlSerializerTypeMapping.Linked (m, v) ->
+            match m.WrapOldName with 
+            | true -> Some x.OriginType
+            | false -> v.FirstNamedType()
+
+
     member x.OfXmlSerializable(value: obj) = x.LinkableTypeMapping.OfXmlSerializable value
 
     member x.ToXmlSerializable(value: obj) = x.LinkableTypeMapping.ToXmlSerializable value
@@ -964,7 +978,6 @@ type FsXmlSerializerTypeMappingPair =
 
 [<AutoOpen>]
 module private _Util2 =
-
 
     let private getReadXmlObjMethodCache = ConcurrentDictionary()
 

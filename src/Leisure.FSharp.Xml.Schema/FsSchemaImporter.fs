@@ -352,7 +352,9 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
                         let r = m.XmlSchemaType.ToSchemas()
                         r
             )
+            |> List.distinctBy(fun m -> m.Name)
             |> List.map(fun m -> m :> XmlSchemaObject)
+        
 
         rootElement :: typeElements @ [(*entryType; *)scaseType]
 
