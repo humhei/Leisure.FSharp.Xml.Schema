@@ -50,10 +50,13 @@ module internal rec FsSchemaTypesAST =
 
         | _ -> None
 
+
+
     type FsXmlSchemaElement =
         { IsOption: bool 
           Name: PropNameOrElementName
           SchemaTypeOrSchemaTypeName: FsSchemaTypeOrSchemaTypeName
+          SimpleTypeInfo: FsXmlSchemaSimpleType option
         }
 
     with 
@@ -69,7 +72,6 @@ module internal rec FsSchemaTypesAST =
                 | _ ->  failwithf "Not implement"
 
             | _ ->
-                
                 let name = x.Name.Text
                 let element = 
                     match x.IsOption with 
@@ -84,29 +86,69 @@ module internal rec FsSchemaTypesAST =
                             Name = name
                         )
 
-                match x.SchemaTypeOrSchemaTypeName with 
-                | FsSchemaTypeOrSchemaTypeName.SchemaTypeName tpName -> 
-                    element.SchemaTypeName <- tpName
-                    element
-
-                | FsSchemaTypeOrSchemaTypeName.SchemaType tp ->
-                    let schemas =  tp.ToSchemas()
-                    match schemas with 
-                    | [schemaType] -> 
-                        element.SchemaType <- schemaType
+                match x.SimpleTypeInfo with 
+                | None -> 
+                    match x.SchemaTypeOrSchemaTypeName with 
+                    | FsSchemaTypeOrSchemaTypeName.SchemaTypeName tpName -> 
+                        element.SchemaTypeName <- tpName
                         element
-                       
-                    | _ -> failwithf "Not implemented, schemaType %A should be singleton here" tp
 
-                //match List.tryLast schemas with 
-                //| None -> failwithf "Invalid token, schemaType %A should be value type here" tp
-                //| Some schemaType -> element.SchemaType <- schemaType
+                    | FsSchemaTypeOrSchemaTypeName.SchemaType tp ->
+                        let schemas =  tp.ToSchemas()
+                        match schemas with 
+                        | [schemaType] -> 
+                            element.SchemaType <- schemaType
+                            element
+                       
+                        | _ -> failwithf "Not implemented, schemaType %A should be singleton here" tp
+
+                    //match List.tryLast schemas with 
+                    //| None -> failwithf "Invalid token, schemaType %A should be value type here" tp
+                    //| Some schemaType -> element.SchemaType <- schemaType
+
+                | Some simpleTypeInfo ->
+                    match x.SchemaTypeOrSchemaTypeName with 
+                    | FsSchemaTypeOrSchemaTypeName.SchemaTypeName tpName ->
+                        let content = 
+                            XmlSchemaSimpleTypeRestriction(
+                                BaseTypeName = tpName
+                            )
+
+                        match simpleTypeInfo.RestrictionInfo.MinInclusive with 
+                        | None -> ()
+                        | Some minInclusive ->
+                            content.Facets.Add(
+                                XmlSchemaMinInclusiveFacet(
+                                    Value = minInclusive.ToString()
+                                )
+                            )
+                            |> ignore
+
+                        match simpleTypeInfo.RestrictionInfo.MaxInclusive with 
+                        | None -> ()
+                        | Some maxInclusive ->
+                            content.Facets.Add(
+                                XmlSchemaMaxInclusiveFacet(
+                                    Value = maxInclusive.ToString()
+                                )
+                            )
+                            |> ignore
+
+                        let simpleType =
+                            XmlSchemaSimpleType(
+                                Content = content
+                            )
+
+                        element.SchemaType <- simpleType
+                        element
+
+                    | _ -> failwithf "[SchemaSimpleType] Invalid token, SchemaTypeOrSchemaTypeName should be SchemaTypeName here"
 
 
     let private createPropSequence (elements: FsXmlSchemaElement list) =
         let propSequence = 
             XmlSchemaSequence()
-
+            
         for element in elements do
             let element = element.ToSchema()
             propSequence.Items.Add(element)
@@ -285,6 +327,7 @@ module internal rec FsSchemaTypesAST =
         { TypeCode: CollectionType
           ElementSchemaType: FsSchemaType
           Element: FsXmlSchemaElement
+          ListRestriction: FsListXmlShemaRestriction option
         }
     with
         
@@ -295,10 +338,23 @@ module internal rec FsSchemaTypesAST =
             let element = x.Element.ToSchema()
 
             do
-                element.MinOccurs <- 0
-                element.MaxOccursString <- "unbounded"
+                match x.ListRestriction with 
+                | None -> 
+                    element.MinOccurs <- 0
+                    element.MaxOccursString <- "unbounded"
 
-            //let arrayTpName = x.ArrayTypeName
+                | Some listRestriction ->
+                    match box listRestriction with 
+                    | null -> failwithf "listRestriction cannot be null here"
+                    | _ -> 
+                        match listRestriction.MinOccurs with 
+                        | None -> element.MinOccurs <- 0
+                        | Some minOccurs -> element.MinOccurs <- minOccurs
+
+                        match listRestriction.MaxOccurs with 
+                        | None -> element.MaxOccursString <- "unbounded"
+                        | Some maxOccurs -> element.MaxOccurs <- maxOccurs
+
 
             let propSequence = 
                 XmlSchemaSequence()
@@ -343,7 +399,8 @@ module internal rec FsSchemaTypesAST =
 
             { Element = element 
               ElementSchemaType = elementSchemaType 
-              TypeCode = tpCode }
+              TypeCode = tpCode
+              ListRestriction = None }
 
 
 
@@ -353,6 +410,72 @@ module internal rec FsSchemaTypesAST =
         | Dictionary of FsSchemaComplexType_Dictionary
         | Collection of FsSchemaComplexType_Collection
     with 
+        member internal x.MapSchemaType(f) =
+            match x with 
+            | Tuple v ->
+                Tuple { v with ElementSchemaTypes = v.ElementSchemaTypes |> List.map (f) }
+
+            | Dictionary v ->
+                Dictionary 
+                    { v with    
+                        Entry = 
+                            { v.Entry with 
+                                KeySchemaType = f v.Entry.KeySchemaType 
+                                ValueSchemaType = f v.Entry.ValueSchemaType
+                            }
+                    }
+
+            | Collection v ->
+                let newSchemaType =  f v.ElementSchemaType
+                Collection 
+                    { v with    
+                        ElementSchemaType = newSchemaType
+                    }
+
+        //member internal x.MapRecursive(f) =
+        //    match x with 
+        //    | Tuple v ->
+        //        Tuple { v with ElementSchemaTypes = v.ElementSchemaTypes |> List.map (f) }
+
+        //    | Dictionary v ->
+        //        Dictionary 
+        //            { v with    
+        //                Entry = 
+        //                    { v.Entry with 
+        //                        KeySchemaType = f v.Entry.KeySchemaType 
+        //                        ValueSchemaType = f v.Entry.ValueSchemaType
+        //                    }
+        //            }
+
+        //    | Collection v ->
+        //        let newSchemaType =  f v.ElementSchemaType
+        //        Collection 
+        //            { v with    
+        //                ElementSchemaType = newSchemaType
+        //            }
+
+        //member internal x.MapRecursive(f) =
+        //    match x with 
+        //    | Tuple v ->
+        //        Tuple { v with ElementSchemaTypes = v.ElementSchemaTypes |> List.map (fun m -> m.MapRecursive f) }
+
+        //    | Dictionary v ->
+        //        Dictionary 
+        //            { v with    
+        //                Entry = 
+        //                    { v.Entry with 
+        //                        KeySchemaType = v.Entry.KeySchemaType.MapRecursive f
+        //                        ValueSchemaType = v.Entry.ValueSchemaType.MapRecursive f
+        //                    }
+        //            }
+
+        //    | Collection v ->
+        //        let newSchemaType =  v.ElementSchemaType.MapRecursive f
+        //        Collection 
+        //            { v with    
+        //                ElementSchemaType = newSchemaType
+        //            }
+
         member x.GetElementName() =
             match x with 
             | Tuple v -> v.InnerElementName
@@ -402,7 +525,8 @@ module internal rec FsSchemaTypesAST =
             let element = 
                 { IsOption = false 
                   SchemaTypeOrSchemaTypeName = FsSchemaTypeOrSchemaTypeName.SchemaTypeName tpName
-                  Name = PropNameOrElementName.PropName uci.Name }
+                  Name = PropNameOrElementName.PropName uci.Name
+                  SimpleTypeInfo = None }
 
 
             { UnionCase = uci 
@@ -453,6 +577,26 @@ module internal rec FsSchemaTypesAST =
         | OneFieldCase of FsSchemaComplexType_Union_OneFieldCase
         | MultipleFieldsCase of FsSchemaComplexType_Union_MultipleFieldsCase
     with 
+        member internal x.MapSchemaType(f) = 
+            match x with 
+            | NamedCase _ -> x
+            | OneFieldCase v ->
+                OneFieldCase { v with ElementSchemaType = f v.ElementSchemaType  }
+
+            | MultipleFieldsCase v ->
+                MultipleFieldsCase { v with ElementSchemaTypes = v.ElementSchemaTypes |> List.map f }
+
+
+        //member internal x.MapRecursive(f) = 
+        //    match x with 
+        //    | NamedCase _ -> x
+        //    | OneFieldCase v ->
+        //        OneFieldCase { v with ElementSchemaType = v.ElementSchemaType.MapRecursive f }
+
+        //    | MultipleFieldsCase v ->
+        //        MultipleFieldsCase { v with ElementSchemaTypes = v.ElementSchemaTypes |> List.map (fun m -> m.MapRecursive f) }
+
+
         member x.UnionCase =
             match x with 
             | NamedCase v -> v.UnionCase
@@ -467,10 +611,40 @@ module internal rec FsSchemaTypesAST =
 
     type FsSchemaComplexType_Union =
         { UnionCases: FsSchemaComplexType_UnionCase list
-          Type: Type }
+          Type: Type
+          TagOptions: UnionTagOptions
+          }
     with 
+        member x.MapSchemaType(f) = 
+            { x with 
+                UnionCases = 
+                    x.UnionCases 
+                    |> List.map (fun m -> 
+                        m.MapSchemaType f
+                    )
+                }
+
+        //member internal x.MapRecursive(f) = 
+        //    { x with 
+        //        UnionCases = 
+        //            x.UnionCases 
+        //            |> List.map (fun m -> 
+        //                m.MapRecursive f
+        //            )
+        //        }
+
+        member internal x.TypeName = 
+            match x.TagOptions with 
+            | UnionTagOptions.Independent ->
+                x.Type.Name
+
+            | UnionTagOptions.SuffixToRootType -> 
+                //x.Type.Name + "_C" + x.UnionCases.Length.ToString()
+                x.Type.Name
+
+
         member x.GetSchemaTypeOrSchemaTypeName() =
-            x.Type.Name
+            x.TypeName
             |> XmlQualifiedName
             |> FsSchemaTypeOrSchemaTypeName.SchemaTypeName
 
@@ -481,20 +655,69 @@ module internal rec FsSchemaTypesAST =
                 propChoice.Items.Add(element)
                 |> ignore
 
-            let union = 
-                let sequence = XmlSchemaSequence()
-                let element = XmlSchemaElement(
-                    Name = "Choice" + x.UnionCases.Length.ToString(),
-                    SchemaType = XmlSchemaComplexType(Particle = propChoice)
-                )
-                sequence.Items.Add element |> ignore
-                sequence
+            match x.TagOptions with 
+            | UnionTagOptions.Independent ->
+
+                let union = 
+                    let sequence = XmlSchemaSequence()
+                    let element = XmlSchemaElement(
+                        Name = "Choice" + x.UnionCases.Length.ToString(),
+                        SchemaType = XmlSchemaComplexType(Particle = propChoice)
+                    )
+                    sequence.Items.Add element |> ignore
+                    sequence
             
-            XmlSchemaComplexType(
-                Name = x.Type.Name,
-                Particle = union
-            )
+                XmlSchemaComplexType(
+                    Name = x.Type.Name,
+                    Particle = union
+                )
+
+            | UnionTagOptions.SuffixToRootType ->
+                let tpName = x.TypeName
+                let element = 
+                    XmlSchemaComplexType(
+                        Name = tpName,
+                        Particle = propChoice
+                    )
+                    //XmlSchemaElement(
+                    //    Name = tpName,
+                    //    SchemaType = 
+                    //)
+
+                element
                 
+    type FsSchemaComplexType_SingleCaseUnion_NoField =
+        { Uci: UnionCaseInfo
+          Type: Type }
+    with 
+        static member Create(uci, tp) =
+            { Uci = uci
+              Type = tp
+            }
+
+        member x.ToSchema() =
+            
+            let content = 
+                XmlSchemaSimpleTypeRestriction(
+                    BaseTypeName = new XmlQualifiedName("string", W3XMLSchema)
+                )
+
+            content.Facets.Add(
+                XmlSchemaEnumerationFacet(
+                    Value = x.Type.Name
+                )
+                //XmlSchemaPatternFacet(
+                //    Value = "[0-9]{4}-[0-9]{3}$"
+                //)
+            )
+            |> ignore
+
+
+            XmlSchemaSimpleType(
+                Name = x.Type.Name,
+                Content = content
+            )
+          
 
     type FsSchemaComplexType_SingleCaseUnion_OneField =
         { Field: PropertyInfo
@@ -507,6 +730,11 @@ module internal rec FsSchemaTypesAST =
             let element = 
                 elementSchemaType.GenerateFsElement(propName = Some "SCase")
 
+            let simpleTypeInfo = getSimpleTypeInfo tp
+
+            let element = 
+                { element with SimpleTypeInfo = simpleTypeInfo }
+
             { Field = field 
               Uci = uci
               ElementSchemaType = elementSchemaType 
@@ -515,11 +743,22 @@ module internal rec FsSchemaTypesAST =
             }
 
         member x.ToSchema() =
+            
             let propSequence = createPropSequence [x.Element]
-            XmlSchemaComplexType(
-                Name = x.Type.Name,
-                Particle = propSequence
-            )
+            match x.Element.SimpleTypeInfo with 
+            | None -> 
+                XmlSchemaComplexType(
+                    Name = x.Type.Name,
+                    Particle = propSequence
+                ) :> XmlSchemaType
+
+            | Some _ ->
+                let item = propSequence.Items.[0] :?> XmlSchemaElement
+                match item.SchemaType with 
+                | null -> failwithf "[XmlSchemaType] Invalid token, schemaType cannot be empty here"
+                | schemaType -> 
+                    schemaType.Name <- x.Type.Name
+                    schemaType
 
     type FsSchemaComplexType_SingleCaseUnion_MultipleFields =
         { Fields: PropertyInfo list
@@ -573,21 +812,37 @@ module internal rec FsSchemaTypesAST =
 
     [<RequireQualifiedAccess>]
     type FsSchemaComplexType_SingleCaseUnion =
+        | NoField of FsSchemaComplexType_SingleCaseUnion_NoField
         | OneField of FsSchemaComplexType_SingleCaseUnion_OneField
         | MultipleFields of FsSchemaComplexType_SingleCaseUnion_MultipleFields
     with 
+        member x.MapSchemaType(f) = 
+            match x with 
+            | NoField _ -> x
+            | OneField v -> OneField { v with ElementSchemaType = f v.ElementSchemaType  }
+            | MultipleFields v ->  
+                MultipleFields { v with ElementSchemaTypes = v.ElementSchemaTypes |> List.map f}
+
+
+        //member internal x.MapRecursive(f) = 
+        //    x.MapSchemaType(fun m -> m.MapRecursive f)
+         
+
         member internal x.Uci() =   
             match x with 
+            | NoField v -> v.Uci
             | OneField v -> v.Uci
             | MultipleFields v -> v.Uci
 
         member x.ToSchema() =
             match x with 
+            | NoField       v -> v.ToSchema()    :> XmlSchemaType
             | OneField       v -> v.ToSchema()
             | MultipleFields v -> v.ToSchema()
 
         member private x.Tp() =
             match x with 
+            | NoField v -> v.Type
             | OneField v -> v.Type
             | MultipleFields v -> v.Type
 
@@ -628,6 +883,20 @@ module internal rec FsSchemaTypesAST =
         | SinglecaseUnion of FsSchemaComplexType_SingleCaseUnion
         | Record of FsSchemaComplexType_Record
     with 
+        member internal x.MapSchemaType(f) =
+            match x with 
+            | SinglecaseUnion v -> SinglecaseUnion(v.MapSchemaType f)
+            | Record v -> Record ({ v with ElementSchemaTypes = v.ElementSchemaTypes |> List.map f})
+            | Union v -> Union (v.MapSchemaType f)
+            | Generic v -> Generic (v.MapSchemaType f)
+
+        //member internal x.MapRecursive(f) =
+        //    match x with 
+        //    | SinglecaseUnion v -> SinglecaseUnion(v.MapRecursive f)
+        //    | Record v -> Record ({ v with ElementSchemaTypes = v.ElementSchemaTypes |> List.map (fun m -> m.MapRecursive f)})
+        //    | Union v -> Union (v.MapRecursive f)
+        //    | Generic v -> Generic (v.MapRecursive f)
+
         member x.GetAsGeneric() =
             match x with 
             | SinglecaseUnion _ 
@@ -638,10 +907,10 @@ module internal rec FsSchemaTypesAST =
 
         member x.ToSchemas() =
             match x with 
-            | Generic             v  -> v.ToSchemas()
-            | Union               v  -> v.ToSchema()  |> List.singleton
+            | Generic             v  -> v.ToSchemas() |> List.map(fun m -> m :> XmlSchemaType)
+            | Union               v  -> v.ToSchema() :> XmlSchemaType |> List.singleton
             | SinglecaseUnion     v  -> v.ToSchema()  |> List.singleton
-            | Record              v  -> v.ToSchema()  |> List.singleton
+            | Record              v  -> v.ToSchema() :> XmlSchemaType |> List.singleton
 
         member x.GetSchemaTypeOrSchemaTypeName() =  
             match x with 
@@ -780,6 +1049,7 @@ module internal rec FsSchemaTypesAST =
                         Name = PropNameOrElementName.PropName (originTpName)
                         IsOption = false
                         SchemaTypeOrSchemaTypeName = innerSchemas
+                        SimpleTypeInfo = None
                     }
 
                 let element = fsSchemaElement.ToSchema()
@@ -805,7 +1075,206 @@ module internal rec FsSchemaTypesAST =
         | Option of FsSchemaType
         | SimpleType of FsSchemaSimpleType
         | MappedType of MappedFsSchemaType
+        | Recursive of System.Type * FsSchemaType option
+
     with 
+        member private x.MapSubSchemaType(f) =
+            match x with 
+            | SimpleType _ -> x
+            | Option v -> 
+                Option(v.MapSubSchemaType f)
+
+
+            | ComplexType v -> ComplexType(v.MapSchemaType f)
+
+            | MappedType (v) -> 
+                MappedType 
+                    { v with FsSchemaType = v.FsSchemaType.MapSubSchemaType f }
+
+            | Recursive (tp, schemaType) -> f x
+
+        /// Will be stackOverflow?
+        member internal x.GetAllRecursiveTypes(f): list<FsSchemaType option> =
+            match x with 
+            | Recursive (tp, schemaType) -> 
+                match schemaType with 
+                | None -> [schemaType]
+                | Some schemaType -> 
+                    [
+                        yield Some schemaType
+                        yield! schemaType.GetAllRecursiveTypes()
+                    ]
+
+            | _ ->  
+                let recursiveTypes = ResizeArray<FsSchemaType option>()
+                x.MapSubSchemaType(fun m ->
+                    let tps = m.GetAllRecursiveTypes()
+                    recursiveTypes.AddRange(tps)
+                    m
+                )
+                |> ignore
+                List.ofSeq recursiveTypes
+
+
+
+        //member internal x.MapRecursive(f: Type -> FsSchemaType, ?level) =
+        //    let level = defaultArg level 1
+        //    let level = max level 1
+
+        //    match x with 
+        //    | Recursive (tp, schemaType) ->
+        //        match schemaType with 
+        //        | None -> 
+        //            let newSchemaType = f tp
+
+        //            let transforms schemaType = 
+        //                let treatRecursive(schemaType: FsSchemaType, f2) =
+        //                    schemaType.MapSubSchemaType(fun schemaType0 ->
+        //                        match schemaType0 with 
+        //                        | Recursive (tp, schemaType) ->
+        //                            match schemaType with 
+        //                            | None -> 
+        //                                let schemaType = f tp
+                                        
+        //                                let newSchemaType = f2 schemaType
+        //                                FsSchemaType.Recursive(
+        //                                    tp,
+        //                                    Some newSchemaType
+        //                                )
+
+        //                            | Some _ -> schemaType0
+
+        //                        | _ -> schemaType0
+        //                    )
+
+        //                //let treatRecursive_Stop(schemaType) =
+        //                //    treatRecursive(schemaType, fun schemaType ->
+        //                //        schemaType
+        //                //    )
+
+        //                let treatRecursive_GoNext (f) schemaType =
+        //                    treatRecursive(schemaType, fun schemaType ->
+        //                        treatRecursive(schemaType, fun schemaType ->
+        //                            f schemaType
+        //                        )
+        //                    )
+
+
+        //                let transforms =
+        //                    [1..level]
+        //                    |> List.map (fun _ -> treatRecursive_GoNext)
+        //                    |> List.reduce(fun a b ->
+        //                        fun f schemaType ->
+        //                            a (b (f)) schemaType
+        //                    )
+
+        //                schemaType
+        //                |> transforms (fun tp -> 
+        //                    tp
+        //                ) 
+
+        //            let p = newSchemaType.ToString()
+        //            let newSchemaType = transforms newSchemaType
+
+        //            FsSchemaType.Recursive(
+        //                tp,
+        //                Some newSchemaType
+        //            )
+                
+        //        | Some _ -> x 
+        //            //let newSchemaType = 
+        //            //    let treatRecursive(schemaType: FsSchemaType, f2) =
+        //            //        schemaType.MapSubSchemaType(fun schemaType0 ->
+        //            //            match schemaType0 with 
+        //            //            | Recursive (tp, schemaType) ->
+        //            //                match schemaType with 
+        //            //                | None -> 
+        //            //                    let newSchemaType = f tp
+        //            //                    FsSchemaType.Recursive(
+        //            //                        tp,
+        //            //                        Some newSchemaType
+        //            //                    )
+
+        //            //                | Some schemaType2 -> 
+        //            //                    let newSchemaType = f2 schemaType2
+        //            //                    Recursive(
+        //            //                        tp,
+        //            //                        Some newSchemaType
+        //            //                    )
+
+        //            //            | _ -> schemaType0
+        //            //        )
+
+        //            //    let treatRecursive_Stop(schemaType) =
+        //            //        treatRecursive(schemaType, fun schemaType ->
+        //            //            schemaType
+        //            //        )
+
+        //            //    let treatRecursive_GoNext (f) schemaType =
+        //            //        treatRecursive(schemaType, fun schemaType ->
+        //            //            treatRecursive(schemaType, fun schemaType ->
+        //            //                treatRecursive(schemaType, fun schemaType ->
+        //            //                    f schemaType
+        //            //                )
+        //            //            )
+        //            //        )
+
+        //                //schemaType
+        //                //|> treatRecursive_GoNext (
+        //                //    treatRecursive_GoNext (
+        //                //        treatRecursive_GoNext (id)
+        //                //    )
+        //                //)
+
+        //                //let r = 
+        //                    //schemaType
+        //                    //|> treatRecursive_GoNext (
+        //                    //    treatRecursive_GoNext (
+        //                    //        treatRecursive_GoNext (
+        //                    //            treatRecursive_GoNext(
+        //                    //                treatRecursive_GoNext(
+        //                    //                    treatRecursive_GoNext id
+        //                    //                )
+        //                    //            )
+        //                    //        )
+        //                    //    )
+        //                    //)
+
+
+        //                    //let transforms =
+        //                    //    [1..level]
+        //                    //    |> List.map (fun _ -> treatRecursive_GoNext)
+        //                    //    |> List.reduce(fun a b ->
+        //                    //        fun f schemaType ->
+        //                    //            a (b (f)) schemaType
+        //                    //    )
+
+        //                    //transforms id schemaType
+
+
+
+
+        //                    //(schemaType, transforms)
+        //                    //||> List.re
+
+        //                    //failwithf ""
+
+        //                //r
+
+
+        //            //let newSchemaType = schemaType.MapRecursive(f)
+        //            //FsSchemaType.Recursive(
+        //            //    tp,
+        //            //    Some newSchemaType
+        //            //)
+
+        //    | _ -> 
+        //        x.MapSubSchemaType(fun tp ->
+        //            tp.MapRecursive(f, level = level)
+        //        )
+
+                    //failwithf "Recursive schema was already updated"
+
         member x.GetAsGeneric() =
             match x with 
             | SimpleType _ -> None
@@ -816,25 +1285,48 @@ module internal rec FsSchemaTypesAST =
                 | true -> None
                 | false -> v.FsSchemaType.GetAsGeneric() 
 
+            | Recursive (_, schemaType) -> 
+                match schemaType with 
+                | None -> failwithf "Invalid token, Recursive schema type was not updated"
+                | Some schemaType -> schemaType.GetAsGeneric()
+
+        member x.GetAsCollection() =
+            match x.GetAsGeneric() with 
+            | None -> None
+            | Some generic ->
+                match generic with 
+                | FsSchemaComplexGenericType.Collection collectionType -> Some collectionType
+                | FsSchemaComplexGenericType.Dictionary _ -> None
+                | FsSchemaComplexGenericType.Tuple _ -> None
+
         member x.ToSchemas(): XmlSchemaType list =
             match x with 
             | SimpleType v -> v.ToSchema() |> Option.toList
             | Option v -> v.ToSchemas()
             | ComplexType v ->  
                 (v.ToSchemas())
-                |> List.map(fun m ->
-                    m :> XmlSchemaType
-                )
+                //|> List.map(fun m ->
+                //    m :> XmlSchemaType
+                //)
 
             | MappedType (v) -> v.ToSchemas() 
+            | Recursive (_, schemaType) -> 
+                match schemaType with 
+                | None -> failwithf "Invalid token, Recursive schema type was not updated"
+                | Some schemaType -> 
+                    failwithf "Cannot convert Recursive schema type to XmlSchemaType"
+                    //schemaType.ToSchemas()
 
         member x.GetElementName(): string = 
-            match x with 
-            | SimpleType tp -> tp.GetElementName()
-            | ComplexType tp -> tp.GetElementName()
-            | Option tp -> tp.GetElementName()
-            | MappedType (tp) -> tp.GetElementName()
+            let name = 
+                match x with 
+                | SimpleType tp -> tp.GetElementName()
+                | ComplexType tp -> tp.GetElementName()
+                | Option tp -> tp.GetElementName()
+                | MappedType (tp) -> tp.GetElementName()
+                | Recursive (tp, _) -> tp.Name
 
+            name
 
         member x.GetSchemaTypeOrSchemaTypeName(): FsSchemaTypeOrSchemaTypeName = 
             match x with 
@@ -842,7 +1334,10 @@ module internal rec FsSchemaTypesAST =
             | ComplexType tp -> tp.GetSchemaTypeOrSchemaTypeName()
             | Option tp -> tp.GetSchemaTypeOrSchemaTypeName()
             | MappedType (tp) -> tp.GetSchemaTypeOrSchemaTypeName()
-
+            | Recursive (tp, _) -> 
+                tp.Name
+                |> XmlQualifiedName
+                |> FsSchemaTypeOrSchemaTypeName.SchemaTypeName
 
         member x.GenerateFsElement(propName: string option): FsXmlSchemaElement =   
             let isOption = x.IsOption
@@ -855,7 +1350,9 @@ module internal rec FsSchemaTypesAST =
             let r = 
                 { IsOption = isOption 
                   Name = name 
-                  SchemaTypeOrSchemaTypeName = x.GetSchemaTypeOrSchemaTypeName() }
+                  SchemaTypeOrSchemaTypeName = x.GetSchemaTypeOrSchemaTypeName()
+                  SimpleTypeInfo = None 
+                }
 
 
             r
@@ -921,3 +1418,24 @@ module internal rec FsSchemaTypesAST =
                 //    | _ -> Others
 
                 //| _ -> Others
+
+
+    type internal RecursiveResolver = RecursiveResolver of (Type -> IFsSchemaType)
+    with 
+        member x.Invoke(tp) =
+            let (RecursiveResolver invoker) = x
+            invoker tp
+
+    type FsXmlSerializerConfiguration with 
+        member internal configuration.RecursiveResolver() =
+            let recursiveResolver =
+                RecursiveResolver(fun tp ->
+                    match configuration.FsSchemaTypeCache.TryGetValue(tp) with 
+                    | true, schemaType ->
+                        schemaType
+                    | false, _ -> failwithf "Invalid token, schema type %A should be cached in previous" tp
+                )
+
+            recursiveResolver
+
+

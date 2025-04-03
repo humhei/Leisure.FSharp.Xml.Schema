@@ -19,6 +19,26 @@ open FsSchemaTypesAST
 
 [<AutoOpen>]
 module internal rec _SerializePart = 
+    type ZippedXmlWriter =
+        { Writer: XmlWriter
+          RecursiveResolver: RecursiveResolver}
+    with 
+        member x.WriteStartElement(localName) = x.Writer.WriteStartElement(localName)
+
+        member x.WriteStartElement(localName, ns) = x.Writer.WriteStartElement(localName, ns)
+
+        member x.WriteEndElement() = x.Writer.WriteEndElement()
+
+        member x.WriteValue(value: string) = x.Writer.WriteValue(value)
+
+        member x.WriteFullEndElement() = x.Writer.WriteFullEndElement()
+
+        member x.WriteString(text) = x.Writer.WriteString(text)
+
+        member x.WriteAttributeString(localName, ns, value) = x.Writer.WriteAttributeString(localName, ns, value)
+        member x.WriteAttributeString(prefix, localName, ns, value) = x.Writer.WriteAttributeString(prefix, localName, ns, value)
+
+
     type private MapSerializer<'k,'v when 'k : comparison>() =
         //static member Deserialize(t:DictionaryType, dict: Dictionary<obj, obj>) =
         //    match t with 
@@ -48,7 +68,7 @@ module internal rec _SerializePart =
         //        box newDict
 
 
-        static member Serialize(t: FsSchemaComplexType_Dictionary, value: obj, writer:XmlWriter) =
+        static member Serialize(t: FsSchemaComplexType_Dictionary, value: obj, writer: ZippedXmlWriter) =
             let tupleList =
                 match t.TypeCode with 
                 | DictionaryType.FSharpMap _ -> 
@@ -86,36 +106,47 @@ module internal rec _SerializePart =
 
 
     type FsSchemaSimpleType_Enum with 
-        member x.WriteValue(writer: XmlWriter, value: obj) =
+        member x.WriteValue(writer: ZippedXmlWriter, value: obj) =
             writer.WriteValue(value.ToString())
 
     type FsSchemaSimpleType_Value with 
-        member x.WriteValue(writer: XmlWriter, value: obj) =
-            writer.WriteValue(value.ToString())
+        member x.WriteValue(writer: ZippedXmlWriter, value: obj) =
+            let value = 
+                match value with 
+                | :? bool as b -> b.ToString().ToLower()
+                | _ -> value.ToString()
+            writer.WriteValue(value)
 
     type FsSchemaSimpleType with 
-        member x.WriteValue(writer: XmlWriter, value: obj) =
+        member x.WriteValue(writer: ZippedXmlWriter, value: obj) =
             match x with 
             | FsSchemaSimpleType.EnumType v -> v.WriteValue(writer, value)
             | FsSchemaSimpleType.ValueType v -> v.WriteValue(writer, value)
 
     type FsSchemaComplexType_Collection with 
-        member x.WriteValue(writer: XmlWriter, value: obj) =   
-            match value with 
-            | :? System.Collections.IEnumerable as items ->
-                for item in items do    
-                    let itemTp = 
-                        { Name = None 
-                          FsSchemaType = x.ElementSchemaType
-                        }
+        member x.WriteValue(writer: ZippedXmlWriter, value: obj) =   
+            match x.ListRestriction with 
+            | None -> 
+                match value with 
+                | :? System.Collections.IEnumerable as items ->
+                    for item in items do    
+                        let itemTp = 
+                            { Name = None 
+                              FsSchemaType = x.ElementSchemaType
+                            }
                         
-                    itemTp.WriteValue(writer, item)
+                        itemTp.WriteValue(writer, item)
 
 
-            | _ -> failwithf "%A should be IEnumerable type" (value.GetType())
+                | _ -> failwithf "%A should be IEnumerable type" (value.GetType())
+
+            | Some listRestriction ->
+                let value = value :?> IFsXmlSchemaListWithRestriction
+                let value = value.BoxedItems
+                { x with ListRestriction = None}.WriteValue(writer, box value)
 
     type FsSchemaComplexType_Dictionary with 
-        member x.WriteValue(writer: XmlWriter, value: obj) =  
+        member x.WriteValue(writer: ZippedXmlWriter, value: obj) =  
             let propDictTp = x.TypeCode
             let mapSerializeMethod = 
                 let mapSerializer = typedefof<MapSerializer<_,_>>.MakeGenericType([|propDictTp.KeyType; propDictTp.ValueType|])
@@ -126,7 +157,7 @@ module internal rec _SerializePart =
             mapSerializeMethod.Invoke(null, [| x; value; writer |]) |> ignore
            
     type FsSchemaComplexType_Tuple with 
-        member x.WriteValue(writer: XmlWriter, value: obj) =  
+        member x.WriteValue(writer: ZippedXmlWriter, value: obj) =  
             writer.WriteStartElement("Tuple" + x.Elements.Length.ToString())
 
             let tupleElements =
@@ -143,7 +174,7 @@ module internal rec _SerializePart =
             writer.WriteFullEndElement()
 
     type FsSchemaComplexGenericType with 
-        member x.WriteValue(writer: XmlWriter, value: obj) =
+        member x.WriteValue(writer: ZippedXmlWriter, value: obj) =
             match x with 
             | FsSchemaComplexGenericType.Collection v -> v.WriteValue(writer, value)
             | FsSchemaComplexGenericType.Dictionary v -> v.WriteValue(writer, value)
@@ -151,7 +182,7 @@ module internal rec _SerializePart =
             | _ -> failwithf "Not implemented"
 
     type FsSchemaComplexType_Record with 
-        member x.WriteValue(writer: XmlWriter, value: obj) =
+        member x.WriteValue(writer: ZippedXmlWriter, value: obj) =
             x.Zip3()
             |> List.iter(fun (element, schemaType, propertyInfo) ->
                 let propValue = propertyInfo.GetValue(value)
@@ -163,18 +194,31 @@ module internal rec _SerializePart =
             )
 
     type FsSchemaComplexType_SingleCaseUnion with 
-        member x.WriteValue(writer: XmlWriter, value: obj) =
+        member x.WriteValue(writer: ZippedXmlWriter, value: obj) =
             match x with 
+            | FsSchemaComplexType_SingleCaseUnion.NoField noField ->
+                //writer.WriteStartElement(noField.Type.Name)
+                //writer.WriteEndElement()
+                writer.WriteString(noField.Type.Name)
+                //writer.WriteElementString(noField.Type.Name, "")
+                //|> ignore
+
             | FsSchemaComplexType_SingleCaseUnion.OneField field ->
                 let fieldValue = 
                     let field = field.Field
                     field.GetValue(value)
 
-                let namedSchemaType =
-                    { Name = Some field.Element.Name.Text
-                      FsSchemaType = field.ElementSchemaType }
+                match field.Element.SimpleTypeInfo with 
+                | None -> 
 
-                namedSchemaType.WriteValue(writer, fieldValue)
+                    let namedSchemaType =
+                        { Name = Some field.Element.Name.Text
+                          FsSchemaType = field.ElementSchemaType }
+
+                    namedSchemaType.WriteValue(writer, fieldValue)
+
+                | Some simpleTypeInfo ->
+                    field.ElementSchemaType.WriteValue(writer, fieldValue)
 
 
            
@@ -192,7 +236,7 @@ module internal rec _SerializePart =
                 writer.WriteEndElement()
 
     type FsSchemaComplexType_Union with 
-        member x.WriteValue(writer: XmlWriter, propValue: obj) =
+        member x.WriteValue(writer: ZippedXmlWriter, propValue: obj) =
             let propTp = x.Type
             let uci, fields = FSharpValue.GetUnionFields(propValue, propTp)
             //let zippedFields =
@@ -209,8 +253,12 @@ module internal rec _SerializePart =
                 uci
 
             let cases = x.UnionCases
+            match x.TagOptions with
+            | UnionTagOptions.Independent ->
+                writer.WriteStartElement("Choice" + cases.Length.ToString())
 
-            writer.WriteStartElement("Choice" + cases.Length.ToString())
+            | UnionTagOptions.SuffixToRootType -> ()
+
 
             match fields with 
             | [||] -> 
@@ -252,21 +300,23 @@ module internal rec _SerializePart =
 
                 writer.WriteFullEndElement()
 
-                                
-            writer.WriteEndElement()
+            match x.TagOptions with
+            | UnionTagOptions.Independent ->
+                writer.WriteEndElement()
+
+            | UnionTagOptions.SuffixToRootType -> ()       
 
     type FsSchemaComplexType with 
-        member x.WriteValue(writer: XmlWriter, value: obj) =
+        member x.WriteValue(writer: ZippedXmlWriter, value: obj) =
             match x with 
             | FsSchemaComplexType.Generic v -> v.WriteValue(writer, value)
             | FsSchemaComplexType.Record v -> v.WriteValue(writer, value)
             | FsSchemaComplexType.SinglecaseUnion v -> v.WriteValue(writer, value)
             | FsSchemaComplexType.Union v -> v.WriteValue(writer, value)
-            | _ -> failwithf "Not implemented"
 
 
     type MappedFsSchemaType with 
-        member x.WriteValue(writer: XmlWriter, value: obj) =
+        member x.WriteValue(writer: ZippedXmlWriter, value: obj) =
             match x.WrapOldName with 
             | false -> 
                 let value = x.TypeMappingPair.ToXmlSerializable value
@@ -281,7 +331,7 @@ module internal rec _SerializePart =
                 
 
     type FsSchemaType with 
-        member x.WriteValue(writer: XmlWriter, value: obj) =
+        member x.WriteValue(writer: ZippedXmlWriter, value: obj) =
             match x with 
             | FsSchemaType.SimpleType v -> v.WriteValue(writer, value)
             | FsSchemaType.ComplexType v -> v.WriteValue(writer, value)
@@ -299,11 +349,20 @@ module internal rec _SerializePart =
             | FsSchemaType.MappedType(v) ->
                 v.WriteValue(writer, value)
 
-            | _ -> failwithf "Not implemented"
+            | FsSchemaType.Recursive (tp, schemaType) ->
+                match schemaType with 
+                | None -> 
+                    let schemaType = writer.RecursiveResolver.Invoke tp
+                    let schemaType = schemaType :?> FsSchemaType
+                    schemaType.WriteValue(writer, value)
+
+                | Some schemaType ->
+                    schemaType.WriteValue(writer, value)
+
 
 
     type NamedFsSchemaType with
-        member x.WriteValue(writer: XmlWriter, value: obj) = 
+        member x.WriteValue(writer: ZippedXmlWriter, value: obj) = 
             match x with 
             | NamedFsSchemaType.ElementName_AND_Tuple2(tupleTp, name) ->
                 x.FsSchemaType.WriteValue(writer, value)
@@ -330,306 +389,18 @@ module internal rec _SerializePart =
         let configuration = configuration
         let encoding = System.Text.Encoding.UTF8
         let tp = typeof<'T>
-        let __CheckTypeValid =
-            match FSharpType.IsRecord tp with 
-            | true -> ()
-            | false -> failwithf "Root type should be fsharp record"
-
-        let props = FSharpType.GetRecordFields tp
-
-
-     
-
-
-     
-        //static member private MakeSelf(propTp: Type, methodName) =
-        //    let x = Unchecked.defaultof<FsXmlSerializer<_>>
-        //    let subPropSerializer, subPropSerializerTP = 
-        //        makeSelfFsXmlSerializerCache.GetOrAdd(propTp, valueFactory = fun _ ->
-        //            let subPropSerializerTP = 
-        //                let subPropSerializerType = 
-        //                    typedefof<FsXmlSerializer<_>>
-
-        //                subPropSerializerType.MakeGenericType([|propTp|])
-
-        //            let subPropSerializer = Activator.CreateInstance(subPropSerializerTP)
-
-        //            subPropSerializer, subPropSerializerTP
-        //        )
-
-        //    let method =
-        //        subPropSerializerTP.GetMethod(methodName)
-        
-        //    fun parameters ->
-        //        method.Invoke(subPropSerializer, parameters)
-
-        //static member private SerializeValue(writer: XmlWriter, prop: SCasablePropertyType, propValue: obj,  configuration: FsXmlSerializerConfiguration, ?inCollection) =        
-            //let propValueType = 
-            //    match propValue with 
-            //    | null -> None
-            //    | _ ->  
-            //        propValue.GetType()
-            //        |> Some
-
-            //let wrapOldName = 
-            //    match propValueType with 
-            //    | None -> None
-            //    | Some propValueType ->
-            //        match configuration.TryGetTypeMapping(propValueType) with 
-            //        | None -> None
-            //        | Some tpMapping -> 
-            //            match tpMapping.TypeMapping.WrapOldName with 
-            //            | true -> Some tpMapping.OriginType.Name
-            //            | false -> None
-
-
-            //let tryWrapOldName_TypeMapping(f) =
-            //        //match propValue with 
-            //        //| :? FsIXmlSerializableTypeMapping as v -> 
-            //        //    match v.WrapOldName with 
-            //        //    | false -> None
-            //        //    | true -> 
-            //        //        propValue.GetType().Name
-            //        //        |> Some
-            //        //| _ -> None
-
-            //    match wrapOldName with 
-            //    | Some oldName -> 
-            //        writer.WriteStartElement(oldName)
-            //        f()
-            //        writer.WriteFullEndElement()
-
-            //    | None -> f()
-
-
-            //let prop, propValue = 
-            //    let prop = 
-            //        match propValue with 
-            //        | null -> prop
-            //        | _ -> prop.ToNamedTypeWith(propValue.GetType())
-
-            //    configuration.UpdateSCasablePropertyTypeAndValue_ToXml(prop, propValue)
-
-
-            //let propTp = prop.PropertyType
-
-            //let tpCode = getFsTpCodeEx (propTp)
-            //match tpCode with 
-            //| FsTypeCodeEx.Tuple (tpCodes) ->
-            //    let inCollection = defaultArg inCollection false
-            //    let ignorePropInCollection(f) =
-            //        let f() =   
-            //            tryWrapOldName_TypeMapping(f)
-
-            //        match inCollection with 
-            //        | false -> 
-            //            writer.WriteStartElement(prop.Name)
-            //            f()
-            //            writer.WriteFullEndElement()
-
-            //        | true -> f()
-
-            //    ignorePropInCollection(fun () ->
-            //        writer.WriteStartElement("Tuple" + tpCodes.Length.ToString())
-
-            //        let tupleElements =
-            //            FSharpValue.GetTupleFields(propValue)
-
-            //        (tpCodes, tupleElements)
-            //        ||> Array.iteri2(fun i (tpCode, tp) tupleElement ->
-            //            let name = itemText i
-            //            FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.NamedType(name, tp), tupleElement, configuration)
-            //        )
-
-            //        writer.WriteFullEndElement()
-            //    )
-
-
-            //| FsTypeCodeEx.Option (tpCode, tp) ->
-            //    match propValue with 
-            //    | null -> 
-            //        writer.WriteStartElement(prop.Name)
-            //        writer.WriteAttributeString("nil", W3XMLSchemaInstance, "true")
-            //        writer.WriteFullEndElement()
-
-            //    | propValue ->
-            //        let valueProp = propValue.GetType().GetProperty("Value")
-            //        let propValue = valueProp.GetValue(propValue)
-            //        FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.NillableNamedType(prop.Name, tp), propValue, configuration)
-
-            //| FsTypeCodeEx.DictionaryType propDictTp -> 
-            //    writer.WriteStartElement(prop.Name)
-
-            //    let mapSerializeMethod = 
-            //        let mapSerializer = typedefof<MapSerializer<_,_>>.MakeGenericType([|propDictTp.KeyType; propDictTp.ValueType|])
-            //        let bindingFlags =
-            //            BindingFlags.NonPublic ||| BindingFlags.Static 
-            //        mapSerializer.GetMethod("Serialize", bindingFlags)
-
-            //    mapSerializeMethod.Invoke(null, [| propDictTp; propValue; writer; configuration; FsXmlSerializer<_>.SerializeRecordStatic |]) |> ignore
-           
-            //    writer.WriteEndElement()
-
-
-            //| FsTypeCodeEx.CollectionType propCollectionTp -> 
-            //    writer.WriteStartElement(prop.Name)
-            //    let elementTp = propCollectionTp.ElementType
-
-            //    match propValue with 
-            //    | :? System.Collections.IEnumerable as items ->
-            //        for item in items do 
-            //            FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.Type elementTp, item, configuration, inCollection = true)
-
-            //    | _ -> failwithf "%s should be IEnumerable type" propTp.Name
-
-            //    writer.WriteEndElement()
-
-            //| FsTypeCodeEx.FsTypeCode tpCode ->
-            
-            //    let writeProp(f) =
-            //        let f() =
-            //            tryWrapOldName_TypeMapping(f)
-
-            //        match prop with 
-            //        | SCasablePropertyType.NillableNamedType _ -> 
-            //            writer.WriteStartElement(prop.Name)
-            //            writer.WriteAttributeString("nil", W3XMLSchemaInstance, "false")
-            //            f()
-            //        | _ -> 
-            //            writer.WriteStartElement(prop.Name)
-            //            f()
-
-            //        writer.WriteFullEndElement()
-
-            //    let writePropValueType(f) =
-            //        match wrapOldName with 
-            //        | None -> 
-            //            match prop with 
-            //            | SCasablePropertyType.NillableNamedType _ -> 
-            //                writer.WriteStartElement(prop.Name)
-            //                writer.WriteAttributeString("nil", W3XMLSchemaInstance, "false")
-            //                f()
-            //            | _ -> 
-            //                writer.WriteStartElement(prop.Name)
-            //                f()
-
-            //            writer.WriteFullEndElement()
-
-
-            //        | Some oldName ->
-            //            writer.WriteStartElement(oldName)
-            //            match prop with 
-            //            | SCasablePropertyType.NillableNamedType _ -> 
-            //                writer.WriteAttributeString("nil", W3XMLSchemaInstance, "false")
-            //                f()
-            //            | _ -> 
-            //                f()
-
-            //            writer.WriteFullEndElement()
-
-
-
-            //    match tpCode with 
-            //    | FsTypeCode.ValueType _
-            //    | FsTypeCode.Enum ->
-            //        writePropValueType(fun () ->
-            //            writer.WriteValue(propValue.ToString())
-            //        )
-                    
-
-            //    | FsTypeCode.Object objectTpCode ->
-            //        match propValue with 
-            //        | :? FsIXmlSerializable as xmlSerilizable -> xmlSerilizable.WriteXml(writer, configuration)
-            //        | _ -> 
-            //            writeProp(fun () ->
-            //                match objectTpCode with 
-            //                | FsObjectTypeCode.FsXmlSerializableTypeMapping  -> 
-            //                    /// already predicate by previous line (| :? FsIXmlSerializable as xmlSerilizable)
-            //                    failwithf "Invalid token"
-
-            //                | FsObjectTypeCode.Record -> 
-            //                    FsXmlSerializer<_>.SerializeRecordStatic(writer, propValue, prop.Nillable, configuration)
-
-            //                | FsObjectTypeCode.SingletonCaseUnion case ->
-            //                    let fields = case.GetFields()
-            //                    match fields with 
-            //                    | [||] -> failwithf "Not implemented"
-            //                    | [|field|] ->
-            //                        let fieldValue = field.GetValue(propValue)
-            //                        FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.OneFieldSCase field.PropertyType, fieldValue, configuration)
-
-            //                    | fields ->
-                            
-            //                        writer.WriteStartElement("SCase")
-
-            //                        for field in fields do
-            //                            let fieldValue = field.GetValue(propValue)
-            //                            FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.PropertyInfo field, fieldValue, configuration)
-            //                            ()
-
-            //                        writer.WriteEndElement()
-
-
-            //                | FsObjectTypeCode.Union cases -> 
-            //                    let uci, fields = FSharpValue.GetUnionFields(propValue, propTp)
-            //                    let zippedFields =
-            //                        uci.GetFields()
-            //                        |> Array.zip fields
-
-
-
-            //                    writer.WriteStartElement("Choice" + cases.Length.ToString())
-            //                    match zippedFields with 
-            //                    | [||] -> 
-            //                        writer.WriteStartElement(uci.Name)
-            //                        writer.WriteFullEndElement()
-
-            //                    | [|field, fieldTp|] ->
-            //                        FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.NamedType(uci.Name, fieldTp.PropertyType), field, configuration)
-                                
-            //                    | zippedFields ->
-            //                        writer.WriteStartElement(uci.Name)
-
-            //                        for (field, fieldTp) in zippedFields do
-            //                            FsXmlSerializer<_>.SerializeValue(writer, SCasablePropertyType.PropertyInfo(fieldTp), field, configuration)
-
-            //                        writer.WriteFullEndElement()
-
-                                
-            //                    writer.WriteEndElement()
-
-                                
-            //            )
-
-
-
 
     
-        static member internal SerializeValue(writer: XmlWriter, propTp: NamedFsSchemaType, propValue: obj) =        
+        static member internal SerializeValue(writer: ZippedXmlWriter, propTp: NamedFsSchemaType, propValue: obj) =        
             propTp.WriteValue(writer, propValue)
     
-        //static member private SerializeRecordStatic(writer: XmlWriter, value: obj, configuration: FsXmlSerializerConfiguration) =
-        //    let tp = value.GetType()
 
-        //    match FSharpType.IsRecord tp with 
-        //    | true ->
-        //        let props = FSharpType.GetRecordFields(tp)
-        //        for prop in props do 
-        //            let propValue = prop.GetValue(value)
-        //            let propTp =
-        //                let fsSchemaType = configuration.GetFsXmlSchemaType(prop.PropertyType)
-        //                { Name = Some prop.Name 
-        //                  FsSchemaType = fsSchemaType }
-
-        //            FsXmlSerializer_SerializePart<_>.SerializeValue(writer, propTp, propValue)
-
-        //    | false -> failwithf "Not implemented"
-
-
-        member x.SerializeRecord(writer: XmlWriter, value: 'T) =
+        member x.Serialize(writer: ZippedXmlWriter, value: 'T) =
+            let tp = typeof<'T>
+            x.WriteW3CAttributeString_xsi_xsd(writer)
             match FSharpType.IsRecord tp with 
             | true ->
-                x.WriteW3CAttributeString_xsi_xsd(writer)
+                let props = FSharpType.GetRecordFields tp
                 for prop in props do 
                     let propValue = prop.GetValue(value)
                     let propTp =
@@ -640,10 +411,16 @@ module internal rec _SerializePart =
                     FsXmlSerializer_SerializePart<_>.SerializeValue(writer, propTp, propValue)
                 
 
-            | false -> failwithf "Not implemented"
+            | false -> 
+                let tp = configuration.GetFsXmlSchemaType(tp)
+                tp.WriteValue(writer, value)
 
 
-        static member SerializeXmlNodeValue(writer: XmlWriter, value: obj, configuration: FsXmlSerializerConfiguration, name: string option) =
+        //member x.SerializeValue(writer: ZippedXmlWriter, value: 'T) =
+        //    let tp = typeof<'T>
+            
+
+        static member SerializeXmlNodeValue(writer: ZippedXmlWriter, value: obj, configuration: FsXmlSerializerConfiguration, name: string option) =
 
             let tp = 
                 let fsSchemaType = configuration.GetFsXmlSchemaType(value.GetType())
@@ -652,7 +429,7 @@ module internal rec _SerializePart =
 
             FsXmlSerializer_SerializePart<_>.SerializeValue(writer, tp, value)
     
-        member private x.WriteW3CAttributeString_xsi_xsd(writer: XmlWriter) =
+        member private x.WriteW3CAttributeString_xsi_xsd(writer: ZippedXmlWriter) =
             writer.WriteAttributeString("xmlns", "xsi", null, W3XMLSchemaInstance)
             writer.WriteAttributeString("xmlns", "xsd", null, W3XMLSchema)
 
@@ -665,14 +442,21 @@ module internal rec _SerializePart =
                     XmlWriterSettings(Indent = true, Encoding = encoding)
                 )
 
+
             match box value with 
             | :? FsIXmlSerializable as v -> 
                 writer.WriteStartElement(tp.Name)
                 v.WriteXml(writer, configuration)
                 writer.WriteEndElement()
             | _->
-                writer.WriteStartElement(tp.Name)
-                x.SerializeRecord(writer, value)
+                let schemaType = configuration.GetFsXmlSchemaType(tp)
+
+                let zippedWriter =
+                    { RecursiveResolver = configuration.RecursiveResolver() 
+                      Writer = writer}
+
+                writer.WriteStartElement(schemaType.GetElementName())
+                x.Serialize(zippedWriter, value)
                 writer.WriteEndElement()
 
 

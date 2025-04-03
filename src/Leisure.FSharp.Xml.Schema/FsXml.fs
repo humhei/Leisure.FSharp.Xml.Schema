@@ -15,6 +15,7 @@ open System.IO
 open System.Collections.Concurrent
 open Microsoft.FSharp.Reflection
 open System.Xml
+open FsSchemaTypesAST
 
 
 //type private MapSerializer<'k,'v when 'k : comparison>() =
@@ -79,15 +80,15 @@ type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
     do configuration.FsIXmlSerializableTypeMappingCache.Clear()
     let encoding = System.Text.Encoding.UTF8
     let tp = typeof<'T>
-    let __CheckTypeValid =
-        match FSharpType.IsRecord tp with 
-        | true -> ()
-        | false -> failwithf "Root type should be fsharp record"
+    //let __CheckTypeValid =
+    //    match FSharpType.IsRecord tp with 
+    //    | true -> ()
+    //    | false -> failwithf "Root type should be fsharp record"
 
     let serializer_part = FsXmlSerializer_SerializePart<'T>(configuration)
     let deserializer_part = FsXmlSerializer_DeserializePart<'T>(configuration)
 
-    let props = FSharpType.GetRecordFields tp
+    //let props = FSharpType.GetRecordFields tp
 
 
 
@@ -149,17 +150,29 @@ type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
     //    FSharpValue.MakeRecord(tp, List.toArray props)
     
 
-    static member DeserializeXmlNodeValueTo(reader: XmlReader, tp: Type, configuration, name) =
-        FsXmlSerializer_DeserializePart<'T>.DeserializeXmlNodeValueTo(reader, tp, configuration, name)
+    static member DeserializeXmlNodeValueTo(reader: XmlReader, tp: Type, configuration: FsXmlSerializerConfiguration, name) =
+        let zippedReader = 
+            { RecursiveResolver = configuration.RecursiveResolver() 
+              Reader = reader }
+
+        FsXmlSerializer_DeserializePart<'T>.DeserializeXmlNodeValueTo(zippedReader, tp, configuration, name)
 
     member x.DeserializeFromFile(fileName: string) =
         deserializer_part.DeserializeFromFile(fileName)
 
-    member x.DeserializeToRecord(reader: XmlReader): 'T =
-        deserializer_part.DeserializeToRecord(reader)
+    member x.Deserialize(reader: XmlReader): 'T =
+        let zippedReader = 
+            { RecursiveResolver = configuration.RecursiveResolver() 
+              Reader = reader }
 
-    member x.SerializeRecord(writer: XmlWriter, value: 'T) =
-        serializer_part.SerializeRecord(writer, value)
+        deserializer_part.Deserialize(zippedReader)
+
+    member x.Serialize(writer: XmlWriter, value: 'T) =
+        let zippedWriter =
+            { RecursiveResolver = configuration.RecursiveResolver() 
+              Writer = writer}
+
+        serializer_part.Serialize(zippedWriter, value)
 
     member private x.File_TrimXsdSchemaEnd(xsdPath) =
         let lines = 
@@ -178,10 +191,8 @@ type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
             |> Array.tryFind(fun m -> m.Name = "XMLSchema")
             |> function
                 | None -> tp
-
                 | Some schema ->
                     schema.PropertyType
-        
         
         let schemas = importer.ImportTp(tp)
         schemas.Write(tw)

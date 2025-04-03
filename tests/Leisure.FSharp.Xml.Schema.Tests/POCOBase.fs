@@ -11,6 +11,172 @@ open System.Diagnostics
 open Leisure.FSharp.Xml.Schema
 open System.Collections.Concurrent
 
+
+
+
+type AtLeastOneListSchema<'item> = internal AtLeastOneListSchema of list<'item>
+with 
+    [<DebuggerBrowsable(DebuggerBrowsableState.RootHidden)>]
+    member x.AsList =
+        let (AtLeastOneListSchema value) = x
+        value
+
+    interface IFsXmlSchemaListWithRestriction<'item> with
+        member x.BoxedItems = 
+            x.AsList
+            |> List.map box
+
+        member x.Items = x.AsList
+
+        member x.Restriction: FsListXmlShemaRestriction = 
+            FsListXmlShemaRestriction.Create(
+                ctorSelf = (fun items -> items :?> list<'item> |> AtLeastOneListSchema |> box),
+                minOccurs = 1
+            )
+
+//[<DebuggerDisplay("{AsList}")>]
+//[<DebuggerTypeProxy(typedefof<AtLeastOneList<_>>)>]
+[<StructuredFormatDisplay("al1List {AsList}")>]
+type AtLeastOneList<'item> = private  AtLeastOneList of list<'item>
+with 
+    static member Create(items: seq<'item>) =
+        let items = List.ofSeq items
+        if items.Length >= 1 then AtLeastOneList(items)
+        else failwithf "Cannot create AtLeastOneList from %A" items
+
+    [<DebuggerBrowsable(DebuggerBrowsableState.RootHidden)>]
+    member x.AsList =
+        let (AtLeastOneList value) = x
+        value
+
+    member x.Item(index: int) = x.AsList.Item(index)
+
+    member x.Length = x.AsList.Length
+
+    member x.Head = x.AsList.Head
+
+    member x.Heads = 
+        let list = x.AsList
+        list.[0..list.Length - 2]
+
+    member x.Last = x.AsList.[x.AsList.Length - 1]
+
+    member x.Tail = x.AsList.Tail
+
+    interface FsIXmlSerializableTypeMapping<AtLeastOneList<'item>, AtLeastOneListSchema<'item>> with
+        member __.OfXml(tp: Type, v) =
+            v.AsList
+            |> AtLeastOneList.Create
+
+        member x.ToXml() = 
+            x.AsList
+            |> AtLeastOneListSchema
+
+        member x.WrapOldName = false
+
+
+type AtLeastOneMap<'key, 'value  when 'key : comparison> = private AtLeastOneMap of Map<'key, 'value>
+with 
+
+    static member Create(items: seq<'key * 'value>, ?checkItemsUnique: bool) =
+        let checkItemsUnique = defaultArg checkItemsUnique false
+
+        let items = List.ofSeq items
+
+        let items = 
+            match checkItemsUnique with 
+            | true ->
+                let keys, values = List.unzip items
+
+                match keys.Length = (List.distinct keys).Length with 
+                | true -> Map.ofList items
+                | false -> failwithf "Duplicate keys are found in %A" keys
+
+            | false -> Map.ofList items
+        if items.Count >= 1 then AtLeastOneMap(items)
+        else failwithf "Cannot create AtLeastOneMap from %A" items
+
+
+    member x.Value =
+        let (AtLeastOneMap value) = x
+        value
+
+    member x.Item(key: 'key) = x.Value.[key]
+
+    member x.AsList() =
+        List.ofSeq x.Value
+        |> List.map (fun m -> m.Key, m.Value)
+
+    member x.Head = 
+        x.Value
+        |> Seq.head
+
+    member x.Count = x.Value.Count
+
+    interface FsIXmlSerializableTypeMapping<AtLeastOneMap<'key, 'value>, Map<'key, 'value>> with
+        member __.OfXml(tp: Type, v) =
+            match v.Count with 
+            | 0 -> failwithf "Cannot create AtLeastOneMap from empty map"
+            | _ -> AtLeastOneMap v
+
+        member x.ToXml() = 
+            x.Value
+
+        member x.WrapOldName = false
+
+
+type Int_BE_0 = private Int_BE_0 of int
+with 
+    member x.Value = 
+        let (Int_BE_0 v) = x
+        v
+
+    interface IFsXmlShemaSimpleType with
+        member _.SimpleTypeInfo =
+            {
+                RestrictionInfo = 
+                    { MinInclusive = Some 0 
+                      MaxInclusive = None }
+            }
+
+        
+
+[<StructuredFormatDisplay("{Value}")>]
+type ``Int>=0`` = private ``Int>=0`` of int
+with 
+    member x.Value = 
+        let (``Int>=0`` v) = x
+        v
+
+    member x.IntText = x.Value.ToString()
+
+    static member TryCreate(input: int) =
+        if input >= 0 then ``Int>=0`` input |> Result.Ok
+        else 
+            sprintf "Cannot create Int32BiggerThan0 from %d" input 
+            |> Result.Error
+
+
+
+    member x.Text = x.Value.ToString()
+
+    static member Create(input: int) =
+        ``Int>=0``.TryCreate input
+        |> function
+            | Result.Ok v -> v
+            | Result.Error error -> failwith error
+
+    interface FsIXmlSerializableTypeMapping<``Int>=0``, Int_BE_0> with
+        member __.OfXml(tp: Type, v) = 
+            v.Value
+            |> ``Int>=0``.Create
+
+        member x.ToXml() = Int_BE_0 x.Value
+
+        member x.WrapOldName = false
+
+        
+
 [<AutoOpen>]
 module private _POCOBaseUtils = 
     let pocoBaseCtrCache = ConcurrentDictionary()

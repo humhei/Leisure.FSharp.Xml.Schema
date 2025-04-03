@@ -19,6 +19,91 @@ open FsSchemaTypesAST
 
 [<AutoOpen>]
 module internal rec _DeserializePart = 
+    type ZippedXmlReader =
+        { Reader: XmlReader
+          RecursiveResolver: RecursiveResolver}
+    with 
+        member x.Read() = x.Reader.Read()
+        member x.Value = x.Reader.Value
+        member x.Name = x.Reader.Name
+        member x.GetAttribute(name, namespaceURI) = x.Reader.GetAttribute(name, namespaceURI)
+        member x.NodeType = x.Reader.NodeType
+
+    let advanceReader(reader: ZippedXmlReader) =
+        let reader = reader.Reader
+        let rec loop () =
+            match reader.Read() with 
+            | true -> 
+                match reader.NodeType with 
+                | XmlNodeType.EndElement -> loop ()
+                | XmlNodeType.XmlDeclaration -> loop ()
+                | XmlNodeType.Whitespace -> loop ()
+                | _ -> true
+
+            | false -> false
+
+        loop()
+       
+    let advanceReaderFullElement(reader: ZippedXmlReader, fElement) =
+        let reader = reader.Reader
+        let name = reader.Name
+
+        let rec loop stack =
+            match reader.Read() with 
+            | true -> 
+                let goEnd(stack) =
+                    let newStack = (stack-1)
+                    assert(newStack >= 0)
+                    match newStack with 
+                    | 0 -> 
+                        match reader.Name = name with 
+                        | true -> true
+                        | false -> failwithf "Invalid token, reader.Name %s should be %s here" reader.Name name 
+
+                    | _ -> false
+
+                match reader.NodeType with 
+                | XmlNodeType.Element -> 
+                    let newStack = stack+1
+
+                    assert(newStack >= 1)
+                    match newStack with 
+                    | 0 -> ()
+                    | _ -> fElement(newStack)
+
+                    match reader.NodeType with 
+                    | XmlNodeType.EndElement ->
+                        match goEnd(newStack) with 
+                        | true -> true
+                        | false -> loop (newStack-1)
+
+                    | _ -> loop (newStack)
+
+
+                | XmlNodeType.EndElement -> 
+                    match goEnd(stack) with 
+                    | true -> true
+                    | false -> loop (stack - 1)
+                | _ -> 
+                    loop stack
+
+            | false -> false
+
+        loop 1
+
+    let advanceReaderFullElement_GetElement(reader: ZippedXmlReader, fElement) =
+        let mutable value = None
+
+        advanceReaderFullElement(reader, fun stack ->
+            let r = fElement stack
+            value <- Some r
+        )
+        |> ignore
+
+        match value with 
+        | None -> failwithf "failed Get Nested singleton element from reader"
+        | Some v -> v
+
     //type private MapSerializer<'k,'v when 'k : comparison>() =
     //    static member Deserialize(t:DictionaryType, dict: Dictionary<obj, obj>) =
     //        match t with 
@@ -75,27 +160,27 @@ module internal rec _DeserializePart =
 
 
     type FsSchemaSimpleType_Enum with 
-        member x.ReadValue(reader: XmlReader) =
+        member x.ReadValue(reader: ZippedXmlReader) =
             reader.Read() |> ignore 
             let propText = reader.Value
             System.Enum.Parse(x.EnumType, propText)
            
 
     type FsSchemaSimpleType_Value with 
-        member x.ReadValue(reader: XmlReader) =
+        member x.ReadValue(reader: ZippedXmlReader) =
             reader.Read() |> ignore 
             let propText = reader.Value
             Convert.ChangeType(propText, x.TypeCode)
       
 
     type FsSchemaSimpleType with 
-        member x.ReadValue(reader: XmlReader) =
+        member x.ReadValue(reader: ZippedXmlReader) =
             match x with 
             | FsSchemaSimpleType.EnumType v -> v.ReadValue(reader)
             | FsSchemaSimpleType.ValueType v -> v.ReadValue(reader)
 
     type FsSchemaComplexType_Collection with 
-        member x.ReadValue(reader: XmlReader) =   
+        member x.ReadValue(reader: ZippedXmlReader) =   
             let tpCode = x.TypeCode
 
             let elementTp = 
@@ -112,12 +197,12 @@ module internal rec _DeserializePart =
                 elements.Add(prop)
             ) |> ignore
                         
-            let elements = tpCode.MakeObject(elements)
+            let elements = tpCode.MakeObject(elements, ?listRestriction = x.ListRestriction)
             elements
 
 
     type FsSchemaComplexType_Dictionary with 
-        member x.ReadValue(reader: XmlReader) =     
+        member x.ReadValue(reader: ZippedXmlReader) =     
 
             let tpCode = x.TypeCode
             let dict = Dictionary<_, _>()
@@ -154,7 +239,7 @@ module internal rec _DeserializePart =
             r
 
     type FsSchemaComplexType_Tuple with 
-        member x.ReadValue_InElement(reader: XmlReader) =     
+        member x.ReadValue_InElement(reader: ZippedXmlReader) =     
             let tupleElements = ResizeArray()
 
             advanceReaderFullElement(reader, fun _ ->
@@ -171,7 +256,7 @@ module internal rec _DeserializePart =
 
             FSharpValue.MakeTuple(Array.ofSeq tupleElements, x.Tp)
 
-        member x.ReadValue(reader: XmlReader) =     
+        member x.ReadValue(reader: ZippedXmlReader) =     
             let tupleElements = ResizeArray()
 
             advanceReaderFullElement(reader, fun _ ->
@@ -188,7 +273,7 @@ module internal rec _DeserializePart =
             FSharpValue.MakeTuple(Array.ofSeq tupleElements, x.Tp)
 
     type FsSchemaComplexGenericType with 
-        member x.ReadValue(reader: XmlReader) =
+        member x.ReadValue(reader: ZippedXmlReader) =
             match x with 
             | FsSchemaComplexGenericType.Collection v -> v.ReadValue(reader)
             | FsSchemaComplexGenericType.Dictionary v -> v.ReadValue(reader)
@@ -198,7 +283,7 @@ module internal rec _DeserializePart =
             | _ -> failwithf "Not implemented"
 
     type FsSchemaComplexType_Record with 
-        member x.ReadValue(reader: XmlReader) =
+        member x.ReadValue(reader: ZippedXmlReader) =
             let props = ResizeArray()
 
             advanceReaderFullElement(reader, fun stack ->
@@ -209,7 +294,8 @@ module internal rec _DeserializePart =
                           FsSchemaType = schemaType }
 
                     let value = namedSchemaType.ReadValue(reader)
-
+                    advanceReader(reader)
+                    |> ignore
                     //let value = schemaType.ReadValue(reader)
                     props.Add(value)
                 )
@@ -219,18 +305,36 @@ module internal rec _DeserializePart =
             FSharpValue.MakeRecord(x.Type, Array.ofSeq props)
 
     type FsSchemaComplexType_SingleCaseUnion with 
-        member x.ReadValue(reader: XmlReader) =
-            let elements = ResizeArray()
+        member x.ReadValue(reader: ZippedXmlReader) =
+            let fields_resizeArray = ResizeArray()
             
             match x with 
+            | FsSchemaComplexType_SingleCaseUnion.NoField noField ->
+                reader.Read() |> ignore 
+                let propText = reader.Value
+
+                match propText = noField.Type.Name with 
+                | true -> ()
+                | false -> failwithf "Invalid token"
+
+
             | FsSchemaComplexType_SingleCaseUnion.OneField field ->
-                advanceReaderFullElement(reader, fun stack ->
+                match field.Element.SimpleTypeInfo with 
+                | None -> 
+                    advanceReaderFullElement(reader, fun stack ->
+                        let uciValue = 
+                            field.ElementSchemaType.ReadValue(reader)
+                        
+                        fields_resizeArray.Add(uciValue)
+                    )
+                    |> ignore
+
+                | Some simpleTypeInfo ->
                     let uciValue = 
                         field.ElementSchemaType.ReadValue(reader)
-                        
-                    elements.Add(uciValue)
-                )
-                |> ignore
+
+                    fields_resizeArray.Add(uciValue)
+                    |> ignore
 
             | FsSchemaComplexType_SingleCaseUnion.MultipleFields fields ->
                 advanceReaderFullElement(reader, fun stack ->
@@ -244,62 +348,77 @@ module internal rec _DeserializePart =
                         )
 
                     advanceReader(reader) |> ignore
-                    elements.AddRange(uciValues)
+                    fields_resizeArray.AddRange(uciValues)
                 )
                 |> ignore
                 
 
-            let fields = Array.ofSeq elements
+            let fields = Array.ofSeq fields_resizeArray
             let r = FSharpValue.MakeUnion(x.Uci(), fields, allowAccessToPrivateRepresentation = true)
             r
 
     type FsSchemaComplexType_Union with 
-        member x.ReadValue(reader: XmlReader) =
+        member x.ReadValue(reader: ZippedXmlReader) =
             let mutable caseValue = None
-            advanceReaderFullElement(reader, fun _ ->
-                advanceReaderFullElement(reader, fun _ ->
-                    let name = reader.Name
-                    let uci = 
-                        x.UnionCases
-                        |> List.find(fun m -> m.UnionCase.Name = name)
+            let advanceReaderFullElement_concated(reader, valueFactory) =
+                match x.TagOptions with 
+                | UnionTagOptions.Independent ->
+                    advanceReaderFullElement(reader, fun _ ->
+                        advanceReaderFullElement(reader, fun _ ->
+                            valueFactory()
+                        )
+                        |> ignore
+                    )
+                    |> ignore
+
+                | UnionTagOptions.SuffixToRootType ->
+                    advanceReaderFullElement(reader, fun _ ->
+                        valueFactory()
+                    )
+                    |> ignore
 
 
-                    let value = 
-                        match uci with 
-                        | FsSchemaComplexType_UnionCase.NamedCase uci -> FSharpValue.MakeUnion(uci.UnionCase, [||])
-                        | FsSchemaComplexType_UnionCase.OneFieldCase uci ->
-                            let value = 
-                                uci.ElementSchemaType.ReadValue(reader)
+            advanceReaderFullElement_concated(reader, fun _ ->
+                let name = reader.Name
+                let uci = 
+                    x.UnionCases
+                    |> List.find(fun m -> m.UnionCase.Name = name)
 
-                            FSharpValue.MakeUnion(uci.UnionCase, [|value|])
 
-                        | FsSchemaComplexType_UnionCase.MultipleFieldsCase fields ->
+                let value = 
+                    match uci with 
+                    | FsSchemaComplexType_UnionCase.NamedCase uci -> FSharpValue.MakeUnion(uci.UnionCase, [||])
+                    | FsSchemaComplexType_UnionCase.OneFieldCase uci ->
+                        let value = 
+                            uci.ElementSchemaType.ReadValue(reader)
 
-                            let elements = ResizeArray()
-                            advanceReaderFullElement(reader, fun _ ->
-                                let name = reader.Name
-                                let _, schemaTp, _ = 
-                                    fields.Zip3()
-                                    |> List.find(fun (_, _, m) -> m.Name = name)
+                        FSharpValue.MakeUnion(uci.UnionCase, [|value|])
 
-                                let element = 
-                                    schemaTp.ReadValue(reader)
-                                elements.Add(element)
-                            )
-                            |> ignore
+                    | FsSchemaComplexType_UnionCase.MultipleFieldsCase fields ->
 
-                            FSharpValue.MakeUnion(uci.UnionCase, Array.ofSeq elements)
+                        let elements = ResizeArray()
+                        advanceReaderFullElement(reader, fun _ ->
+                            let name = reader.Name
+                            let _, schemaTp, _ = 
+                                fields.Zip3()
+                                |> List.find(fun (_, _, m) -> m.Name = name)
 
-                    caseValue <- Some value
-                )
-                |> ignore
+                            let element = 
+                                schemaTp.ReadValue(reader)
+                            elements.Add(element)
+                        )
+                        |> ignore
+
+                        FSharpValue.MakeUnion(uci.UnionCase, Array.ofSeq elements)
+
+                caseValue <- Some value
             )
             |> ignore
 
             caseValue.Value
 
     type FsSchemaComplexType with 
-        member x.ReadValue(reader: XmlReader) =
+        member x.ReadValue(reader: ZippedXmlReader) =
             match x with 
             | FsSchemaComplexType.Generic v -> v.ReadValue(reader)
             | FsSchemaComplexType.Record v -> v.ReadValue(reader)
@@ -309,7 +428,7 @@ module internal rec _DeserializePart =
             | _ -> failwithf "Not implemented"
 
     type MappedFsSchemaType with 
-        member x.ReadValue(reader: XmlReader) =
+        member x.ReadValue(reader: ZippedXmlReader) =
             match x.WrapOldName with 
             | false -> 
                 let value = x.FsSchemaType.ReadValue(reader)
@@ -335,7 +454,7 @@ module internal rec _DeserializePart =
 
 
     type FsSchemaType with 
-        member x.ReadValue(reader: XmlReader) =
+        member x.ReadValue(reader: ZippedXmlReader) =
             match x with 
             | FsSchemaType.SimpleType v -> v.ReadValue(reader)
             | FsSchemaType.ComplexType v -> v.ReadValue(reader)
@@ -371,11 +490,21 @@ module internal rec _DeserializePart =
                 let value = v.ReadValue(reader)
                 value
 
+            | FsSchemaType.Recursive (tp, schemaType) ->
+                match schemaType with 
+                | None -> 
+                    let schemaType = reader.RecursiveResolver.Invoke tp
+                    let schemaType = schemaType :?> FsSchemaType
+                    schemaType.ReadValue(reader)
+
+                | Some schemaType ->
+                    schemaType.ReadValue(reader)
+
             | _ -> failwithf "Not implemented"
 
 
     type NamedFsSchemaType with
-        member x.ReadValue(reader: XmlReader) = 
+        member x.ReadValue(reader: ZippedXmlReader) = 
             let nodeType = reader.NodeType
             match nodeType with 
             | XmlNodeType.Element ->
@@ -396,323 +525,18 @@ module internal rec _DeserializePart =
         let configuration = configuration
         let encoding = System.Text.Encoding.UTF8
         let tp = typeof<'T>
-        let __CheckTypeValid =
-            match FSharpType.IsRecord tp with 
-            | true -> ()
-            | false -> failwithf "Root type should be fsharp record"
+        //let __CheckTypeValid =
+        //    match FSharpType.IsRecord tp with 
+        //    | true -> ()
+        //    | false -> failwithf "Root type should be fsharp record"
 
-        let props = FSharpType.GetRecordFields tp
+        //let props = FSharpType.GetRecordFields tp
 
-        static member internal DeserializeToProp(reader: XmlReader, propTp: NamedFsSchemaType) =
+        static member internal DeserializeToProp(reader: ZippedXmlReader, propTp: NamedFsSchemaType) =
             propTp.ReadValue(reader)
-            //    let nodeType = reader.NodeType
-            //    let propMappingOp = configuration.UpdateSCasablePropertyType_ToXml_Op prop
 
-            //    let prop0 =
-            //        match propMappingOp with 
-            //        | None -> prop
-            //        | Some propMapping ->
-            //            match propMapping.TypeMapping.WrapOldName with
-            //            | true -> prop
-            //            | false -> propMapping.PropertyType
+        static member DeserializeXmlNodeValueTo(reader: ZippedXmlReader, tp: Type, configuration: FsXmlSerializerConfiguration, name: string option) =
 
-            //    let prop =
-            //        match propMappingOp with 
-            //        | None -> configuration.UpdateSCasablePropertyType_ToXml__NoUpdateForWrappedTypeName prop
-            //        | Some propTypeMapping -> prop0
-
-            //    let value = 
-            //        match nodeType with 
-            //        | XmlNodeType.Element -> 
-            //            let tpCode = 
-            //                let propTp =  (prop.PropertyType) 
-            //                getFsTpCodeEx(propTp)
-
-            //            let propTp = prop0.PropertyType
-
-            //            let createNullable(text: string, fNull, f) =
-            //                match text, prop.Nillable with 
-            //                | "", true -> 
-            //                    fNull()
-            //                    null
-            //                | _ -> f()
-
-            //            match tpCode with 
-            //            | FsTypeCodeEx.Tuple (_) -> 
-            //                let tpCodes = FSharpType.GetTupleElements propTp
-
-            //                let inCollection = defaultArg inCollection false
-            //                let advanceReader_IgnorePropInCollection(reader, f) =
-            //                    match inCollection with 
-            //                    | false -> 
-            //                        advanceReaderFullElement(reader, fun _ ->
-            //                            advanceReaderFullElement(reader, fun _ ->
-            //                                f()
-            //                            )
-            //                            |> ignore
-            //                        )
-            //                        |> ignore
-
-            //                    | true ->
-            //                        advanceReaderFullElement(reader, fun _ ->
-            //                            f()
-            //                        )
-            //                        |> ignore
-
-            //                let tupleElements = ResizeArray()
-
-            //                advanceReader_IgnorePropInCollection(reader, fun () ->
-            //                    let i = tupleElements.Count
-            //                    let (tp) = tpCodes.[i]
-            //                    let name = itemText i
-            //                    let element = FsXmlSerializer<_>.DeserializeToProp(reader, SCasablePropertyType.NamedType(name, tp), configuration)
-            //                    tupleElements.Add(element)
-            //                )
-                            
-            //                match prop.Nillable, tupleElements.Count with 
-            //                | true, 0 -> 
-            //                    null
-            //                | _ ->
-            //                    let tuple = FSharpValue.MakeTuple(Array.ofSeq tupleElements, propTp)
-            //                    tuple
-
-                        
-            //            | FsTypeCodeEx.Option (_, _) ->
-            //                let elementType = propTp.GetGenericArguments().[0]
-            //                let elementValue = 
-            //                    FsXmlSerializer<_>.DeserializeToProp(
-            //                        reader,
-            //                        SCasablePropertyType.NillableNamedType(elementType.Name, elementType),
-            //                        configuration)
-            //                let r = makeOption(propTp, elementType, elementValue)
-            //                r
-
-            //            | FsTypeCodeEx.DictionaryType tpCode ->
-
-
-            //            | FsTypeCodeEx.CollectionType _ -> 
-            //                let tpCode = 
-            //                    match getFsTpCodeEx propTp with 
-            //                    | FsTypeCodeEx.CollectionType tpCode -> tpCode
-            //                    | _ -> failwithf "Invalid token"
-
-            //                let elementTp = tpCode.ElementType
-            //                let elements = ResizeArray()
-            //                advanceReaderFullElement(reader, fun stack ->
-            //                    let prop = 
-            //                        FsXmlSerializer<_>.DeserializeToProp(
-            //                            reader,
-            //                            SCasablePropertyType.Type elementTp,
-            //                            configuration,
-            //                            inCollection = true)
-            //                    elements.Add(prop)
-            //                    ()
-            //                ) |> ignore
-                        
-            //                let elements = tpCode.MakeObject(elements)
-            //                elements
-
-
-            //            | FsTypeCodeEx.FsTypeCode _ ->
-            //                let tpCode = getFsTpCode propTp
-
-
-                                
-                        
-            //                match tpCode with 
-            //                | FsTypeCode.Enum ->
-            //                    reader.Read() |> ignore 
-            //                    let propText = reader.Value
-            //                    createNullable(propText, ignore, fun _ ->
-            //                        System.Enum.Parse(propTp, propText)
-            //                    )
-
-            //                | FsTypeCode.ValueType _ -> 
-            //                    reader.Read() |> ignore 
-            //                    let propText = reader.Value
-            //                    createNullable(propText, ignore, fun _ ->
-            //                        Convert.ChangeType(propText, propTp)
-            //                    )
-
-
-            //                | FsTypeCode.Object tpCode -> 
-            //                    match getReadXmlObjMethod propTp with 
-            //                    | Some (defaultObj, methodInfo) ->
-            //                        let r = methodInfo.Invoke(defaultObj, [|propTp; reader; configuration|])
-            //                        r
-
-            //                    | None -> 
-            //                        match tpCode with 
-            //                        | FsObjectTypeCode.FsXmlSerializableTypeMapping  -> 
-            //                            /// already predicate by previous line (match getReadXmlObjMethod propTp with)
-            //                            //let r = FsXmlSerializer<_>.DeserializeToProp(reader, prop0, configuration)
-            //                            match propMappingOp with 
-            //                            | None ->  failwith "Invalid token"
-            //                            | Some typeMapping ->
-            //                                match typeMapping.TypeMapping.WrapOldName with 
-            //                                | true -> 
-            //                                    let targetTypeCode = getFsTpCodeEx typeMapping.TypeMapping.TargetType
-            //                                    let advanceReader_wrapOldName(reader, f) =
-            //                                        match targetTypeCode with 
-            //                                        | FsTypeCodeEx.FsTypeCode (FsTypeCode.Enum)
-            //                                        | FsTypeCodeEx.FsTypeCode (FsTypeCode.ValueType _) -> f 0
-            //                                        | _ -> 
-            //                                            advanceReaderFullElement(reader, f)
-            //                                            |> ignore
-
-            //                                    let readInnerValue() =
-            //                                        let mutable valueMutable = null
-            //                                        advanceReader_wrapOldName(reader, fun _ ->
-            //                                            let tpName = reader.Name
-            //                                            let prop = 
-            //                                                SCasablePropertyType.NamedType(tpName, typeMapping.TypeMapping.TargetType)
-
-            //                                                //match prop.Nillable with 
-            //                                                //| true -> 
-            //                                                //    SCasablePropertyType.NillableNamedType(tpName, typeMapping.TypeMapping.TargetType)
-
-            //                                                //| false -> SCasablePropertyType.NamedType(tpName, typeMapping.TypeMapping.TargetType)
-
-            //                                            let value = 
-            //                                                FsXmlSerializer<_>.DeserializeToProp(
-            //                                                    reader,
-            //                                                    prop,
-            //                                                    configuration
-            //                                                )
-
-            //                                            valueMutable <- value
-            //                                        )
-
-            //                                        |> ignore
-
-            //                                        valueMutable
-                                                
-            //                                    match prop.Nillable with 
-            //                                    | true -> 
-            //                                        let isNull = 
-            //                                            let attr = reader.GetAttribute("nil", W3XMLSchemaInstance)
-            //                                            match attr with 
-            //                                            | null -> false
-            //                                            | attr -> System.Boolean.Parse attr
-
-            //                                        match isNull with 
-            //                                        | true -> 
-            //                                            reader.Read() |> ignore
-            //                                            null
-                                                    
-            //                                        | false -> readInnerValue()
-
-            //                                    | false -> readInnerValue()
-
-            //                                | false -> failwithf "Invalid token"
-
-            //                        | FsObjectTypeCode.Record ->
-            //                            FsXmlSerializer<_>.DeserializeToRecordStatic(reader, propTp, configuration)
-                                    
-            //                        | FsObjectTypeCode.SingletonCaseUnion uci ->  
-            //                            let elements = ResizeArray()
-
-            //                            advanceReaderFullElement(reader, fun _ ->
-            //                                let fields = uci.GetFields() 
-            //                                match fields with 
-            //                                | [||] -> failwithf "Not implemented"
-            //                                | [|field|] ->
-            //                                    let uciValue = 
-            //                                        FsXmlSerializer<_>.DeserializeToProp(
-            //                                            reader,
-            //                                            SCasablePropertyType.OneFieldSCase field.PropertyType,
-            //                                            configuration)
-            //                                    elements.Add(uciValue)
-
-            //                                | fields ->
-            //                                    let uciValues = 
-            //                                        fields
-            //                                        |> Array.map(fun field ->
-            //                                            advanceReader(reader) |> ignore
-            //                                            let r = 
-            //                                                FsXmlSerializer<_>.DeserializeToProp(
-            //                                                    reader,
-            //                                                    SCasablePropertyType.OneFieldSCase field.PropertyType,
-            //                                                    configuration
-            //                                                )
-            //                                            r
-            //                                        )
-            //                                    advanceReader(reader) |> ignore
-            //                                    elements.AddRange(uciValues)
-            //                            )
-            //                            |> ignore
-
-            //                            let fields = Array.ofSeq elements
-            //                            let r = FSharpValue.MakeUnion(uci, fields, allowAccessToPrivateRepresentation = true)
-            //                            r
-
-            //                        | FsObjectTypeCode.Union cases -> 
-            //                            let mutable caseValue = None
-            //                            advanceReaderFullElement(reader, fun _ ->
-            //                                advanceReaderFullElement(reader, fun _ ->
-            //                                    let name = reader.Name
-            //                                    let uci = 
-            //                                        cases
-            //                                        |> Array.find(fun m -> m.Name = name)
-
-            //                                    let fields = uci.GetFields()
-            //                                    let value = 
-            //                                        match fields with 
-            //                                        | [||] -> FSharpValue.MakeUnion(uci, [||])
-            //                                        | [|field|] ->
-            //                                            let value = 
-            //                                                FsXmlSerializer<_>.DeserializeToProp(   
-            //                                                    reader,
-            //                                                    SCasablePropertyType.NamedType(uci.Name, field.PropertyType),
-            //                                                    configuration
-            //                                                )
-
-            //                                            FSharpValue.MakeUnion(uci, [|value|])
-
-            //                                        | fields ->
-            //                                            let elements = ResizeArray()
-            //                                            advanceReaderFullElement(reader, fun _ ->
-            //                                                let name = reader.Name
-            //                                                let field = 
-            //                                                    fields
-            //                                                    |> Array.find(fun m -> m.Name = name)
-
-            //                                                let element = 
-            //                                                    FsXmlSerializer<_>.DeserializeToProp(
-            //                                                        reader,
-            //                                                        SCasablePropertyType.PropertyInfo(field),
-            //                                                        configuration
-            //                                                    )
-
-            //                                                elements.Add(element)
-            //                                            )
-            //                                            |> ignore
-            //                                            //let value = 
-            //                                            //    FsXmlSerializer<_>.DeserializeToProp(reader, SCasablePropertyType.NamedType(uci.Name, field.PropertyType))
-            //                                            FSharpValue.MakeUnion(uci, Array.ofSeq elements)
-
-            //                                    caseValue <- Some value
-            //                                )
-            //                                |> ignore
-            //                            )
-            //                            |> ignore
-
-            //                            caseValue.Value
-
-
-            //        | _ -> failwithf "Not implemented"
-                            
-
-            //    match propMappingOp with 
-            //    | None -> value
-            //    | Some propMappingOp -> 
-
-            //        match prop.Nillable, value with 
-            //        | true, null -> null
-            //        | false, null -> failwithf "%A Value cannot be null" prop
-            //        | _ -> propMappingOp.TypeMapping.OfXmlSerializable value
-
-        static member DeserializeXmlNodeValueTo(reader: XmlReader, tp: Type, configuration: FsXmlSerializerConfiguration, name: string option) =
             let tp = 
                 let fsSchemaType = configuration.GetFsXmlSchemaType(tp)
                 { FsSchemaType = fsSchemaType 
@@ -720,40 +544,55 @@ module internal rec _DeserializePart =
 
             FsXmlSerializer_DeserializePart<_>.DeserializeToProp(reader, tp)
 
-        member x.DeserializeToRecord(reader: XmlReader): 'T =
-            let props = props
-            let rec loop accum =
-                match advanceReader(reader) with 
+        member x.Deserialize(reader: ZippedXmlReader): 'T =
+            let tp = typeof<'T>
+            //let __CheckTypeValid =
+            //    match FSharpType.IsRecord tp with 
+            //    | true -> ()
+            //    | false -> failwithf "Root type should be fsharp record"
+
+            match FSharpType.IsRecord tp with 
+            | true ->
+                let props = FSharpType.GetRecordFields tp
+
+                let props = props
+                let rec loop accum =
+                    match advanceReader(reader) with 
+                    | true -> 
+                        match reader.NodeType with 
+                        | XmlNodeType.Element -> 
+                            let prop = 
+                                props
+                                |> Array.find(fun m -> m.Name = reader.Name)
+
+                            let propTp = 
+                                { Name = Some prop.Name 
+                                  FsSchemaType = configuration.GetFsXmlSchemaType(prop.PropertyType) }
+
+                            let propValue = FsXmlSerializer_DeserializePart<_>.DeserializeToProp(reader, propTp)
+                            loop (propValue :: accum) 
+
+                        | _ -> failwithf "Not implemented"
+
+                    | false -> List.rev accum
+
+                advanceReader(reader) |> ignore
+                match reader.Name = tp.Name || reader.Name + "_XMLSchema" = tp.Name with 
                 | true -> 
-                    match reader.NodeType with 
-                    | XmlNodeType.Element -> 
-                        let prop = 
-                            props
-                            |> Array.find(fun m -> m.Name = reader.Name)
+                    reader.Read() |> ignore
+                    |> ignore
 
-                        let propTp = 
-                            { Name = Some prop.Name 
-                              FsSchemaType = configuration.GetFsXmlSchemaType(prop.PropertyType) }
-
-                        let propValue = FsXmlSerializer_DeserializePart<_>.DeserializeToProp(reader, propTp)
-                        loop (propValue :: accum) 
-
-                    | _ -> failwithf "Not implemented"
-
-                | false -> List.rev accum
-
-            advanceReader(reader) |> ignore
-            match reader.Name = tp.Name || reader.Name + "_XMLSchema" = tp.Name with 
-            | true -> 
-                reader.Read() |> ignore
-                |> ignore
-
-            | false -> failwithf "Invalid token, reader.Name %s should be record type name %s here" reader.Name tp.Name
+                | false -> failwithf "Invalid token, reader.Name %s should be record type name %s here" reader.Name tp.Name
 
 
-            let props = loop []
-            FSharpValue.MakeRecord(tp, List.toArray props)
-            |> unbox<'T>
+                let props = loop []
+                FSharpValue.MakeRecord(tp, List.toArray props)
+                |> unbox<'T>
+
+            | false ->
+                let schemaTp = configuration.GetFsXmlSchemaType(tp)
+                schemaTp.ReadValue(reader)
+                |> unbox<'T>
 
         member x.DeserializeFromFile(fileName: string) =
             
@@ -761,7 +600,10 @@ module internal rec _DeserializePart =
             match getReadXmlObjMethod tp with 
             | None ->
                 let reader = XmlReader.Create(reader)
-                x.DeserializeToRecord(reader)
+                let zippedReader = 
+                    { RecursiveResolver = configuration.RecursiveResolver() 
+                      Reader = reader }
+                x.Deserialize(zippedReader)
                 //let serializer = new XmlSerializer(tp)
                 //let r = serializer.Deserialize(reader);
                 //r :?> 'T

@@ -40,8 +40,8 @@ module GeneralRecord =
 
 
     type ColorMapping =
-        { OriginKnownColor: Set<KnownColor>
-          TargetKnownColor: KnownColor
+        { TargetKnownColor: KnownColor
+          OriginKnownColor: Set<KnownColor>
           IndexedCard: Map<int, Card>
           ID: int option
         }
@@ -72,6 +72,7 @@ module GeneralRecordWithNestedRecord =
     [<CLIMutable>]
     type InnerProps =
         { 
+            ShapeEnum: ShapeEnum
             Name: string
         }
 
@@ -101,7 +102,7 @@ module GeneralRecordWithNestedRecord =
 
         static member ReadXml(reader, config) =
             let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
-            xsSubmit.DeserializeToRecord(reader)
+            xsSubmit.Deserialize(reader)
             |> ColorMapping.OfSchema
             
 
@@ -113,13 +114,15 @@ module GeneralRecordWithNestedRecord =
 
             member x.WriteXml(writer, config) = 
                 let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
-                xsSubmit.SerializeRecord(writer, x.XMLSchema)
+                xsSubmit.Serialize(writer, x.XMLSchema)
 
 
         static member SampleData =
             { OriginKnownColor = KnownColor.Black 
               TargetKnownColor = KnownColor.Red
-              InnerProps = {Name = "Circle1"} }
+              InnerProps =  
+                {Name = "Circle1"
+                 ShapeEnum = ShapeEnum.Rectangle} }
 
 [<RequireQualifiedAccess>]
 module GeneralRecordWithSingletonCase =
@@ -137,36 +140,36 @@ module GeneralRecordWithSingletonCase =
         }
 
     /// Color value Tolerance for comparison
-    type Tolerance =  private ByValue of float * float
+    type Tolerance =  ByValue 
    
 
     [<CLIMutable>]
     type ColorMapping_XMLSchema =
         { OriginColor: KnownColor
           TargetColor: KnownColor
-          Tolerance: Tolerance }
+          ToleranceProp: Tolerance }
 
     [<CLIMutable>]
     type ColorMapping =
         { OriginKnownColor: KnownColor
           TargetKnownColor: KnownColor
-          Tolerance: Tolerance }
+          ToleranceProp: Tolerance }
     with 
         member x.XMLSchema = 
             { OriginColor = x.OriginKnownColor 
               TargetColor = x.TargetKnownColor
-              Tolerance  = x.Tolerance }
+              ToleranceProp  = x.ToleranceProp }
 
         static member OfSchema(schema: ColorMapping_XMLSchema) =
             {
                 OriginKnownColor = schema.OriginColor
                 TargetKnownColor = schema.TargetColor
-                Tolerance        = schema.Tolerance
+                ToleranceProp        = schema.ToleranceProp
             }
 
         static member ReadXml(reader, config) =
             let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
-            xsSubmit.DeserializeToRecord(reader)
+            xsSubmit.Deserialize(reader)
             |> ColorMapping.OfSchema
             
 
@@ -178,13 +181,13 @@ module GeneralRecordWithSingletonCase =
 
             member x.WriteXml(writer, config) = 
                 let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
-                xsSubmit.SerializeRecord(writer, x.XMLSchema)
+                xsSubmit.Serialize(writer, x.XMLSchema)
 
 
         static member SampleData =
             { OriginKnownColor = KnownColor.Black 
               TargetKnownColor = KnownColor.Red
-              Tolerance = Tolerance.ByValue (5, 3) }
+              ToleranceProp = Tolerance.ByValue  }
 
 
 [<RequireQualifiedAccess>]
@@ -236,7 +239,7 @@ module GeneralRecordWithTuple =
 
         static member ReadXml(reader, config) =
             let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
-            xsSubmit.DeserializeToRecord(reader)
+            xsSubmit.Deserialize(reader)
             |> ColorMapping.OfSchema
             
 
@@ -248,7 +251,7 @@ module GeneralRecordWithTuple =
 
             member x.WriteXml(writer, config) = 
                 let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
-                xsSubmit.SerializeRecord(writer, x.XMLSchema)
+                xsSubmit.Serialize(writer, x.XMLSchema)
 
 
         static member SampleData =
@@ -313,7 +316,7 @@ module GeneralRecordWithUnion =
 
         static member ReadXml(reader, config) =
             let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
-            xsSubmit.DeserializeToRecord(reader)
+            xsSubmit.Deserialize(reader)
             |> ColorMapping.OfSchema
             
 
@@ -325,7 +328,7 @@ module GeneralRecordWithUnion =
 
             member x.WriteXml(writer, config) = 
                 let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
-                xsSubmit.SerializeRecord(writer, x.XMLSchema)
+                xsSubmit.Serialize(writer, x.XMLSchema)
 
 
         static member SampleData =
@@ -379,7 +382,7 @@ module GeneralRecordWithCustomMapping =
           TargetColor: KnownColor
           Tolerance: Tolerance
           //Tolerance: ToleranceValue
-          //ColorSpace: ColorSpace
+          ColorSpace: ColorSpace
         }
 
     type ColorMapping =
@@ -389,14 +392,14 @@ module GeneralRecordWithCustomMapping =
 
           Tolerance: Tolerance
           //Tolerance: ToleranceValue
-          //ColorSpace: ColorSpace
+          ColorSpace: ColorSpace
         }
     with 
         member x.XMLSchema = 
             { OriginColor = x.OriginKnownColor 
               TargetColor = x.TargetKnownColor
               Tolerance  = x.Tolerance
-              //ColorSpace = x.ColorSpace 
+              ColorSpace = x.ColorSpace 
             }
 
         static member OfSchema(schema: ColorMapping_XMLSchema) =
@@ -404,12 +407,12 @@ module GeneralRecordWithCustomMapping =
                 OriginKnownColor = schema.OriginColor
                 TargetKnownColor = schema.TargetColor
                 Tolerance        = schema.Tolerance
-                //ColorSpace       = schema.ColorSpace
+                ColorSpace       = schema.ColorSpace
             }
 
         static member ReadXml(reader, config) =
             let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
-            xsSubmit.DeserializeToRecord(reader)
+            xsSubmit.Deserialize(reader)
             |> ColorMapping.OfSchema
             
 
@@ -421,7 +424,7 @@ module GeneralRecordWithCustomMapping =
 
             member x.WriteXml(writer, config) = 
                 let xsSubmit = FsXmlSerializer<ColorMapping_XMLSchema>(config)
-                xsSubmit.SerializeRecord(writer, x.XMLSchema)
+                xsSubmit.Serialize(writer, x.XMLSchema)
 
 
 
@@ -445,8 +448,10 @@ module GeneralRecordWithCustomMapping =
                 //        Tolerance.ByValuesOption (None, Some (ToleranceValue.Create (6, 6)))
                 //    }
                 //]
-              //ColorSpace = ColorSpace(ColorSpaceEnum.RGB)
+              ColorSpace = ColorSpace(ColorSpaceEnum.RGB)
             }
+
+
 
 module GeneralRecordWithSkipComparasion =
     [<RequireQualifiedAccess>]
@@ -478,10 +483,29 @@ let config = FsXmlSerializerConfiguration.DefaultValue
 System.IO.Directory.CreateDirectory(@"xml")
 
 
-type ABC =
-    | A of int
-    | B 
-    | C 
+type RecordWithInt_BE_0 =
+    { Name: string 
+      Number: ``Int>=0`` }
+
+type RecordWithAtleastOneList =
+    { Name: string 
+      Numbers: AtLeastOneList<int> }
+
+type RecordWithAtleastOneMap =
+    { Name: string 
+      NumberPairs: AtLeastOneMap<int, int> }
+
+[<RequireQualifiedAccess>]
+type DirectoryOrFileName =
+    | FileName of string
+    | Directory of current: string * subDirOrFileNames: DirectoryOrFileName list
+    | And of DirectoryOrFileName * DirectoryOrFileName
+
+
+type RecordWithRecursiveType =
+    { Name: string 
+      DirectoryOrFileName: DirectoryOrFileName }
+
 let MyTests =
     
   testList "MyTests" [
@@ -620,4 +644,101 @@ let MyTests =
       match data = data2 with 
       | true -> pass()
       | false -> fail()
+
+    testCase "allow non root record type" <| fun _ ->
+      let fileID = 10
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID
+      let data = Some GeneralRecordWithSkipComparasion.Record.SampleData.ProductNameProp
+      let config = FsXmlSerializerConfiguration.DefaultValue
+
+      let serializer = new FsXmlSerializer<ProductName option>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
+    testCase "simple type for singleton union case" <| fun _ ->
+      let fileID = 11
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID
+      let data = 
+        { Name = "MyName"
+          Number = ``Int>=0``.Create 1 }
+        
+      let config = FsXmlSerializerConfiguration.DefaultValue
+
+      let serializer = new FsXmlSerializer<RecordWithInt_BE_0>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
+    testCase "AtLeastOneList min minoccurs support" <| fun _ ->
+      let fileID = 12
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID
+      let data = 
+        { Name = "MyName"
+          Numbers = AtLeastOneList.Create [1; 2; 3] }
+        
+      let config = FsXmlSerializerConfiguration.DefaultValue
+
+      let serializer = new FsXmlSerializer<RecordWithAtleastOneList>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
+    testCase "AtLeastOneMap support" <| fun _ ->
+      let fileID = 13
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID
+      let data = 
+        { Name = "MyName"
+          NumberPairs = 
+            AtLeastOneMap.Create [
+                (1, 2)
+                (3, 4)
+            ]
+          }
+        
+      let config = FsXmlSerializerConfiguration.DefaultValue
+
+      let serializer = new FsXmlSerializer<RecordWithAtleastOneMap>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
+    ftestCase "recursive type support" <| fun _ ->
+      let fileID = 14
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID
+      let data = 
+        { Name = "MyName"
+          DirectoryOrFileName = 
+            DirectoryOrFileName.Directory(
+                "currentDir",
+                [DirectoryOrFileName.Directory (
+                    "subDir",
+                    [DirectoryOrFileName.FileName "MyFileName"]
+                )]
+            )
+            //DirectoryOrFileName.FileName "fileName"
+          }
+        
+      let config = FsXmlSerializerConfiguration.DefaultValue
+
+      let serializer = new FsXmlSerializer<RecordWithRecursiveType>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
   ]

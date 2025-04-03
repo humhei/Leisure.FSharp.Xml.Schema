@@ -19,6 +19,76 @@ open Microsoft.FSharp.Reflection
 open System.Xml
 open System.Xml.Schema
 
+type UnionTagOptions =
+    | Independent = 0
+    | SuffixToRootType = 1
+
+type FsXmlShemaRestriction =
+    { MinInclusive: float option 
+      MaxInclusive: float option }
+with 
+    static member private Empty =
+        { MinInclusive = None 
+          MaxInclusive = None }
+
+    static member Create(?minInclusive, ?maxInclusive) =
+        let r = 
+            { MinInclusive = minInclusive 
+              MaxInclusive = maxInclusive }
+
+        match r = FsXmlShemaRestriction.Empty with 
+        | true -> failwithf "Cannot define an empty FsXmlShemaRestriction"
+        | false -> r
+
+type FsXmlSchemaSimpleType =
+    { RestrictionInfo: FsXmlShemaRestriction }
+
+type FsListXmlShemaRestriction =
+    { MinOccurs: int option 
+      MaxOccurs: int option
+      CtorSelf: obj -> obj }
+with 
+    static member private Empty =
+        { MinOccurs = None 
+          MaxOccurs = None
+          CtorSelf = fun _ -> box }
+
+
+    static member Create(ctorSelf, ?minOccurs, ?maxOccurs) =
+        let r = 
+            { CtorSelf = ctorSelf
+              MinOccurs = minOccurs 
+              MaxOccurs = maxOccurs }
+
+        match r.MinOccurs, r.MaxOccurs with 
+        | None, None -> failwithf "Cannot create empty FsListXmlShemaRestriction"
+        | _ -> r
+
+   
+
+
+
+type FsXmlSchemaListWithRestriction<'item> =
+    { Items: list<'item>
+      Restriction: FsListXmlShemaRestriction }
+
+    static member internal OfArray(items: array<'item>) =
+        { Items = List.ofSeq items 
+          Restriction = Unchecked.defaultof<_> }
+
+type IFsXmlSchemaListWithRestriction =
+    abstract member Restriction: FsListXmlShemaRestriction
+    abstract member BoxedItems: list<obj>
+
+type IFsXmlSchemaListWithRestriction<'item> =
+    inherit IFsXmlSchemaListWithRestriction
+    abstract member Items: list<'item>
+
+
+type IFsXmlShemaSimpleType =
+    abstract member SimpleTypeInfo: FsXmlSchemaSimpleType
+
+
 type FsIXmlSerializableTypeMapping = 
     abstract member WrapOldName: bool
 
@@ -38,6 +108,15 @@ module private _Type_Extensions =
                 m.Name.ToLower() = name.ToLower()
             )
 
+
+    let fixTypeName (tpName: string) =
+        tpName
+            .Replace(">=", "_GE_")
+            .Replace(">", "_GT_")
+            .Replace("<=", "_LE_")
+            .Replace("<", "_LT_")
+            .Replace("=", "_EQ_")
+
 type FsXmlSerializerTypeMapping =
     { ToXmlSerializable: obj -> obj 
       OfXmlSerializable: obj -> obj
@@ -55,9 +134,17 @@ type FsXmlSerializerConfiguration =
     internal
         { TypeMapping: Dictionary<Type, FsXmlSerializerTypeMapping>
           FsIXmlSerializableTypeMappingCache:  ConcurrentDictionary<Type, FsXmlSerializerTypeMapping option>
-          FsSchemaTypeCache: ConcurrentDictionary<Type, IFsSchemaType>}
+          FsSchemaTypeCache: ConcurrentDictionary<Type, IFsSchemaType>
+          UnionTagOptions: UnionTagOptions }
 with 
     member x.AddTypeMapping<'Origin, 'Target>(toXml: 'Origin -> 'Target, ofXml: 'Target -> 'Origin, ?wrapOldName) =
+        let __checkConversionValid =
+            let originTp = typeof<'Origin>
+            let taregtTp = typeof<'Target>
+            match originTp = taregtTp with 
+            | true -> failwithf "[TypeMapping] origin type %A cannot be the same to target type" originTp
+            | false -> ()
+
         let typeMapping = 
             let toXml (v: obj) =
                 toXml (v :?> 'Origin)
@@ -99,6 +186,7 @@ with
         { TypeMapping = Dictionary()
           FsIXmlSerializableTypeMappingCache = ConcurrentDictionary() 
           FsSchemaTypeCache = ConcurrentDictionary()
+          UnionTagOptions = UnionTagOptions.SuffixToRootType
         }
 
     member internal x.UpdateTypeAndValue_ToXml(tp: Type, value: obj) =
@@ -150,78 +238,7 @@ module internal _Utils =
     let itemText (i) =
         "Item" + (i+1).ToString()
 
-    let advanceReader(reader: XmlReader) =
-        let rec loop () =
-            match reader.Read() with 
-            | true -> 
-                match reader.NodeType with 
-                | XmlNodeType.EndElement -> loop ()
-                | XmlNodeType.XmlDeclaration -> loop ()
-                | XmlNodeType.Whitespace -> loop ()
-                | _ -> true
 
-            | false -> false
-
-        loop()
-       
-    let advanceReaderFullElement(reader: XmlReader, fElement) =
-        let name = reader.Name
-
-        let rec loop stack =
-            match reader.Read() with 
-            | true -> 
-                let goEnd(stack) =
-                    let newStack = (stack-1)
-                    assert(newStack >= 0)
-                    match newStack with 
-                    | 0 -> 
-                        match reader.Name = name with 
-                        | true -> true
-                        | false -> failwithf "Invalid token, reader.Name %s should be %s here" reader.Name name 
-
-                    | _ -> false
-
-                match reader.NodeType with 
-                | XmlNodeType.Element -> 
-                    let newStack = stack+1
-
-                    assert(newStack >= 1)
-                    match newStack with 
-                    | 0 -> ()
-                    | _ -> fElement(newStack)
-
-                    match reader.NodeType with 
-                    | XmlNodeType.EndElement ->
-                        match goEnd(newStack) with 
-                        | true -> true
-                        | false -> loop (newStack-1)
-
-                    | _ -> loop (newStack)
-
-
-                | XmlNodeType.EndElement -> 
-                    match goEnd(stack) with 
-                    | true -> true
-                    | false -> loop (stack - 1)
-                | _ -> 
-                    loop stack
-
-            | false -> false
-
-        loop 1
-
-    let advanceReaderFullElement_GetElement(reader: XmlReader, fElement) =
-        let mutable value = None
-
-        advanceReaderFullElement(reader, fun stack ->
-            let r = fElement stack
-            value <- Some r
-        )
-        |> ignore
-
-        match value with 
-        | None -> failwithf "failed Get Nested singleton element from reader"
-        | Some v -> v
 
 
     let [<Literal>] W3XMLSchema = "http://www.w3.org/2001/XMLSchema"
@@ -247,7 +264,8 @@ module internal _Utils =
 
     let private typeCodeCache = ConcurrentDictionary()
 
-
+    type internal InvlaidXmlSchemaTypeException(message: string) =
+        inherit System.Exception(message)
 
     let getFsTpCode (tp: Type) =
         typeCodeCache.GetOrAdd(tp, valueFactory = fun _ ->
@@ -260,12 +278,18 @@ module internal _Utils =
                     match FSharpType.IsUnion tp with 
                     | true -> 
                         match FSharpType.GetUnionCases(tp, true) with 
-                        | [||] -> failwithf "[Xml serializable] Un supported type %A" tp
+                        | [||] -> 
+                            sprintf "[Xml serializable] Un supported type %A" tp
+                            |> InvlaidXmlSchemaTypeException
+                            |> raise
+
                         | [|case|] ->
                             let fields = case.GetFields()
                             
                             match fields with 
-                            | [||] ->  failwithf "[Xml serializable] Un supported type %A" tp
+                            | [||] ->  
+                                FsTypeCode.Object(FsObjectTypeCode.SingletonCaseUnion case)
+                                //failwithf "[Xml serializable] Un supported type %A" tp
                             | _ ->
                                 FsTypeCode.Object(FsObjectTypeCode.SingletonCaseUnion case)
                           
@@ -279,12 +303,17 @@ module internal _Utils =
                             | [|case|] ->
                                 FsTypeCode.Object(FsObjectTypeCode.SingletonCaseUnion case)
 
-                            | _ -> failwithf "[Xml serializable] Un supported type %A" tp
+                            | _ -> 
+                                sprintf "[Xml serializable] Un supported type %A" tp
+                                |> InvlaidXmlSchemaTypeException
+                                |> raise
 
                         | false -> 
                             match tp.GetInterface_Last(nameof FsIXmlSerializableTypeMapping) with 
                             | None -> 
-                                failwithf "[Xml serializable] Un supported type %A, using FsXmlSerializableSchema instead" tp
+                                sprintf "[Xml serializable] Un supported type %A, using FsXmlSerializableSchema instead" tp
+                                |> InvlaidXmlSchemaTypeException
+                                |> raise
 
                             | Some itp ->
                                 FsTypeCode.Object(FsObjectTypeCode.FsXmlSerializableTypeMapping)
@@ -306,6 +335,15 @@ module internal _Utils =
                 let ofArray = listModule.GetMethod("OfArray")
                 ofArray
 
+        let private listModule_with_Restriction_ofArray_MethodInfo = 
+            lazy
+                typedefof<FsXmlSchemaListWithRestriction<_>>
+                //let list = []
+                //let fsharpCoreAssembly = list.GetType().Assembly
+                //let listModule = fsharpCoreAssembly.GetType("Microsoft.FSharp.Collections.ListModule")
+                //let ofArray = listModule.GetMethod("OfArray")
+                //ofArray
+
         let private setModule_ofArray_MethodInfo = 
             lazy
                 let list = []
@@ -323,6 +361,7 @@ module internal _Utils =
                 ofArray
 
         let private listModule_ofArray_delegateCache = ConcurrentDictionary()
+        let private listModule_with_Restriction_ofArray_delegateCache = ConcurrentDictionary()
         let private setModule_ofArray_delegateCache = ConcurrentDictionary()
         let private mapModule_ofArray_delegateCache = ConcurrentDictionary()
 
@@ -345,6 +384,29 @@ module internal _Utils =
             let methodInfo = 
                 listModule_ofArray_delegateCache.GetOrAdd(elementType, valueFactory = fun _ ->
                     listModule_ofArray_MethodInfo.Value.MakeGenericMethod(elementType)
+                )
+
+            methodInfo.Invoke(null, [|array|])
+
+        let listModule_with_Restriction_ofArray(array: Array, elementType: Type) =
+            //let delegate_ = 
+            //    listModule_ofArray_delegateCache.GetOrAdd(elementType, valueFactory = fun _ ->
+            //        let outputTp = typedefof<_ list>.MakeGenericType(elementType)
+            //        let inputTp = array.GetType()
+            //        let methodInfo = listModule_ofArray_MethodInfo.Value.MakeGenericMethod(elementType)
+
+            //        let delegateType = 
+            //            Expression.GetDelegateType([|inputTp; outputTp|]);
+            //        //let tp = typedefof<_ []>.MakeGenericType(elementType)
+            //        let delegate_ = 
+            //            let m: Func<_, _> = List.ofArray 
+            //            let p = m.GetType()
+            //            methodInfo.CreateDelegate(delegateType, null)
+            //        delegate_
+            //    )
+            let methodInfo = 
+                listModule_with_Restriction_ofArray_delegateCache.GetOrAdd(elementType, valueFactory = fun _ ->
+                    listModule_with_Restriction_ofArray_MethodInfo.Value.MakeGenericType([|elementType|]).GetMethod("OfArray", BindingFlags.NonPublic ||| BindingFlags.Static)
                 )
 
             methodInfo.Invoke(null, [|array|])
@@ -411,6 +473,8 @@ module internal _Utils =
 
             list
 
+
+
         let arrayToCSharpHashSet(array: seq<_>, elementType: Type) =
             let tp = typedefof<HashSet<_>>.MakeGenericType(elementType)
             let addMethod = tp.GetMethod("Add")
@@ -450,7 +514,7 @@ module internal _Utils =
             | HashSet     tp -> tp
 
 
-        member internal x.MakeObject(elements: ResizeArray<obj>) =
+        member internal x.MakeObject(elements: ResizeArray<obj>, ?listRestriction: FsListXmlShemaRestriction) =
             let elementTp = x.ElementType
             let array() =
                 let array = 
@@ -464,7 +528,15 @@ module internal _Utils =
             match x with 
             | Array _ -> box (array())
             | FSharpList _ ->
-                listModule_ofArray(array(), elementTp)
+                match listRestriction with 
+                | None -> listModule_ofArray(array(), elementTp)
+                | Some listRestriction ->
+                    let values = listModule_ofArray(array(), elementTp)
+                    let values = listRestriction.CtorSelf values
+                    values
+                    //failwithf ""
+                    //listModule_with_Restriction_ofArray(array(), elementTp)
+
             | List _ ->
                 arrayToCSharpList(elements, elementTp)
             | Seq _ -> box (array())
@@ -914,6 +986,8 @@ module private _DefaultObject =
             
         )
 
+
+
 [<RequireQualifiedAccess>]
 type LinkableFsXmlSerializerTypeMapping =
     | EndPoint of FsXmlSerializerTypeMapping
@@ -929,6 +1003,12 @@ with
         | EndPoint v -> v.WrapOldName
         | Linked (m, v) -> m.WrapOldName || v.WrapOldName
 
+    member internal x.AllTypes() =
+        match x with 
+        | EndPoint v -> [v.TargetType]
+        | Linked (m, v) -> 
+            [m.TargetType;
+             yield! v.AllTypes()]
 
     member x.OfXmlSerializable(value: obj) =
         match x with 
@@ -948,6 +1028,20 @@ and LinkableFsXmlSerializerTypeMappingPair =
     { OriginType: Type 
       LinkableTypeMapping: LinkableFsXmlSerializerTypeMapping }
 with 
+    member internal x.AllTypes() =
+        [ x.OriginType
+          x.LinkableTypeMapping.TargetType ]
+
+    member internal x.CheckAllTheTypesNotTheSame() =
+        x.AllTypes()
+        |> List.groupBy id 
+        |> List.iter(fun (tp, tps) ->
+            match tps with 
+            | []
+            | [_] -> ()
+            | _ -> failwithf "[TypeMapping] Duplicated type %A" (tps.Length, tp)
+        )
+
     member internal x.FirstNamedType() = 
         match x.LinkableTypeMapping with 
         | LinkableFsXmlSerializerTypeMapping.EndPoint v ->
@@ -980,6 +1074,38 @@ type FsXmlSerializerTypeMappingPair =
 module private _Util2 =
 
     let private getReadXmlObjMethodCache = ConcurrentDictionary()
+    let private getSimpleTypeCache = ConcurrentDictionary()
+    let private getListRestrictionCache = ConcurrentDictionary()
+
+    let getListRestriction(tp: Type) =
+        getListRestrictionCache.GetOrAdd(tp, valueFactory = fun _ ->
+            match tp.GetInterface_Last(nameof IFsXmlSchemaListWithRestriction + "`1") with 
+            | Some v -> 
+                let instance = createDefaultObject tp :?> IFsXmlSchemaListWithRestriction
+                let elementType = tp.GetGenericArguments().[0]
+                let targetType = 
+                    typedefof<list<_>>.MakeGenericType(elementType)
+
+                Some 
+                    {| 
+                        Restriction = instance.Restriction
+                        ElementType = elementType
+                        TargetType  = targetType
+                    |}
+
+            | None -> None
+        )
+
+    let getSimpleTypeInfo(tp: Type) =
+        getSimpleTypeCache.GetOrAdd(tp, valueFactory = fun _ ->
+            match tp.GetInterface_Last(nameof IFsXmlShemaSimpleType) with 
+            | None -> None
+            | Some itp ->
+                let instance = createDefaultObject tp :?> IFsXmlShemaSimpleType
+                Some instance.SimpleTypeInfo
+        )
+
+
 
     let getReadXmlObjMethod(tp: Type) =
         getReadXmlObjMethodCache.GetOrAdd(tp, valueFactory = fun _ ->
@@ -1225,6 +1351,14 @@ module private _Util2 =
                                   WrapOldName = defaultObj.WrapOldName
                                 }
 
+                            match tp.IsSubclassOf genericArguments.[0] || tp = genericArguments.[0] with 
+                            | true -> ()
+                            | false -> failwithf "[TypeMapping] this type %A must be same to(or inherited from) origin type %A" tp genericArguments.[0] 
+
+                            match tpMapping.TargetType = tp with 
+                            | true -> failwithf "[TypeMapping] origin type %A cannot be the same to target type" tp
+                            | false -> ()
+
                             x.TypeMapping.Add(tp, tpMapping)
                             Some tpMapping
 
@@ -1250,28 +1384,33 @@ module private _Util2 =
 
 
         member internal x.TryGetTypeMapping(tp: Type): LinkableFsXmlSerializerTypeMappingPair option =
-            match x.TypeMapping.TryGetValue (tp) with 
-            | false, _ -> None
-            | true, typeMapping ->
-                //match x.AddTypeMappingByTypeEntity(tpMapping.TargetType) with 
-                //| None -> 
+                match x.TypeMapping.TryGetValue (tp) with 
+                | false, _ -> None
+                | true, typeMapping ->
+                    //match x.AddTypeMappingByTypeEntity(tpMapping.TargetType) with 
+                    //| None -> 
 
-                //| Some targetType ->
-                //    failwithf
-                //        "Not implemented when target type %A is also FsIXmlSerializableTypeMapping" 
-                //        tpMapping.TargetType
-                x.AddTypeMappingByType(typeMapping.TargetType)
+                    //| Some targetType ->
+                    //    failwithf
+                    //        "Not implemented when target type %A is also FsIXmlSerializableTypeMapping" 
+                    //        tpMapping.TargetType
+                    x.AddTypeMappingByType(typeMapping.TargetType)
                 
-                match x.TryGetTypeMapping(typeMapping.TargetType) with 
-                | None -> 
-                    { OriginType = tp
-                      LinkableTypeMapping = LinkableFsXmlSerializerTypeMapping.EndPoint typeMapping }
-                    |> Some
+                    match x.TryGetTypeMapping(typeMapping.TargetType) with 
+                    | None -> 
+                        { OriginType = tp
+                          LinkableTypeMapping = LinkableFsXmlSerializerTypeMapping.EndPoint typeMapping }
+                        |> Some
 
-                | Some tpMappingPair ->
-                    { OriginType = tp
-                      LinkableTypeMapping = LinkableFsXmlSerializerTypeMapping.Linked (typeMapping, tpMappingPair) }
-                    |> Some
+                    | Some tpMappingPair ->
+                        { OriginType = tp
+                          LinkableTypeMapping = LinkableFsXmlSerializerTypeMapping.Linked (typeMapping, tpMappingPair) }
+                        |> Some
+
+                |> Option.map(fun tpMappingPair ->
+                    tpMappingPair.CheckAllTheTypesNotTheSame()
+                    tpMappingPair
+                )
 
 
 
