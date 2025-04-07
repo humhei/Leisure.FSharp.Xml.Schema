@@ -13,6 +13,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Fake.IO.FileSystem" Version="5.20.4" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Update="FSharp.Core" Version="5.0.1" />

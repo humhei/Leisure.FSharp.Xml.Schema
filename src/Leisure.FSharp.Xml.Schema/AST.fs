@@ -854,10 +854,12 @@ module internal rec FsSchemaTypesAST =
             |> XmlQualifiedName
             |> FsSchemaTypeOrSchemaTypeName.SchemaTypeName
 
+
     type FsSchemaComplexType_Record =
         { Elements: FsXmlSchemaElement list
           ElementSchemaTypes: FsSchemaType list
           PropertyInfos: PropertyInfo list
+          JsonPOCO: JsonPOCO option
           Type: Type }
     with 
         member x.Zip3() =
@@ -1078,6 +1080,20 @@ module internal rec FsSchemaTypesAST =
         | Recursive of System.Type * FsSchemaType option
 
     with 
+
+        member x.IsOptionEx() =
+            match x with 
+            | Option _ -> true
+            | MappedType (v) -> v.FsSchemaType.IsOptionEx()
+            | _ -> false
+
+        member x.IsRecordEx() =
+            match x with 
+            | ComplexType (FsSchemaComplexType.Record _) -> true 
+            | Option v -> v.IsRecordEx() 
+            | MappedType (v) -> v.FsSchemaType.IsRecordEx()
+            | _ -> false
+
         member private x.MapSubSchemaType(f) =
             match x with 
             | SimpleType _ -> x
@@ -1340,7 +1356,7 @@ module internal rec FsSchemaTypesAST =
                 |> FsSchemaTypeOrSchemaTypeName.SchemaTypeName
 
         member x.GenerateFsElement(propName: string option): FsXmlSchemaElement =   
-            let isOption = x.IsOption
+            let isOption = x.IsOptionEx()
             let name =
                 match propName with 
                 | None -> x.GetElementName() |> PropNameOrElementName.ElementName

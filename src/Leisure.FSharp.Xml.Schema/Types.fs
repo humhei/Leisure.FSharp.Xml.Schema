@@ -1,6 +1,8 @@
 ﻿// Learn more about F# at http://fsharp.org
 namespace Leisure.FSharp.Xml.Schema
 #nowarn "0104"
+open Newtonsoft.Json
+
 open System.Runtime.Serialization
 
 #nowarn "3535"
@@ -247,8 +249,21 @@ module internal _Utils =
     let private textInfo = (new CultureInfo("en-US", false)).TextInfo
     let toTitleCase (text: string) = textInfo.ToTitleCase(text)
 
+    type JsonParameter =
+        { Member: PropertyInfo 
+          Parameter: ParameterInfo }
+
+    type JsonPOCO =
+        { Constructor: ConstructorInfo 
+          ZippedParameters: array<JsonParameter>}
+    with 
+        member x.Members =
+            x.ZippedParameters
+            |> Array.map (fun m -> m.Member)
+
     [<RequireQualifiedAccess>]
     type FsObjectTypeCode =
+        | JsonPOCO of JsonPOCO
         | Record 
         | Union of UnionCaseInfo []
         | SingletonCaseUnion of UnionCaseInfo
@@ -266,6 +281,88 @@ module internal _Utils =
 
     type internal InvlaidXmlSchemaTypeException(message: string) =
         inherit System.Exception(message)
+
+
+
+
+    let private getJsonContructor(tp: Type) =
+        let privateCtrs = tp.GetConstructors(BindingFlags.Instance ||| BindingFlags.NonPublic)
+        let publicCtrs = tp.GetConstructors(BindingFlags.Instance ||| BindingFlags.Public)
+
+        let jsonConstructor =
+            let ctrs = 
+                match privateCtrs, publicCtrs with 
+                | null, null -> [||]
+                | null, _ -> publicCtrs
+                | _, null -> privateCtrs
+                | _ -> Array.append (privateCtrs) publicCtrs
+
+            ctrs
+            |> Array.tryFind(fun m -> 
+                m.CustomAttributes
+                |> Seq.exists(fun m ->
+                    m.AttributeType = typeof<JsonConstructorAttribute>
+                )
+            )
+
+        match jsonConstructor with 
+        | None -> None
+        | Some jsonConstructor ->
+            let parameters = jsonConstructor.GetParameters()
+            let members_with_jsonProperty =
+                let publicProps = 
+                    tp.GetProperties(BindingFlags.Public ||| BindingFlags.Instance)
+                    |> Array.filter(fun m ->
+                        let attr =  m.GetCustomAttribute<JsonPropertyAttribute>()
+                        match attr with 
+                        | null -> false
+                        | _ -> true
+                    )
+
+                let privateProps = 
+                    tp.GetProperties(BindingFlags.NonPublic ||| BindingFlags.Instance)
+                    |> Array.filter(fun m ->
+                        let attr =  m.GetCustomAttribute<JsonPropertyAttribute>()
+                        match attr with 
+                        | null -> false
+                        | _ -> true
+                    )
+
+                Array.append privateProps publicProps
+
+            let zipped =
+                parameters
+                |> Array.map(fun parameter ->
+                    let member_with_jsonProperty =
+                        members_with_jsonProperty
+                        |> Array.tryFind(fun m -> m.Name.ToLowerInvariant() = parameter.Name.ToLowerInvariant())
+
+                    match member_with_jsonProperty with 
+                    | None -> failwithf "[%A] Cannot find json property with name %A" jsonConstructor.DeclaringType parameter.Name
+                    | Some member_with_jsonProperty ->
+                        {
+                            Member = member_with_jsonProperty
+                            Parameter = parameter
+                        }
+                )
+
+            { Constructor = jsonConstructor 
+              ZippedParameters = zipped }
+            |> Some
+
+            //match members_with_jsonProperty.Length = parameters.Length with 
+            //| true -> 
+            
+
+            //| false -> 
+            //    failwithf 
+            //        "[%A] Members with json property length %d is not equal to jsonContructor paramters length %d" 
+            //        tp
+            //        members_with_jsonProperty.Length 
+            //        parameters.Length
+
+                
+
 
     let getFsTpCode (tp: Type) =
         typeCodeCache.GetOrAdd(tp, valueFactory = fun _ ->
@@ -311,9 +408,15 @@ module internal _Utils =
                         | false -> 
                             match tp.GetInterface_Last(nameof FsIXmlSerializableTypeMapping) with 
                             | None -> 
-                                sprintf "[Xml serializable] Un supported type %A, using FsXmlSerializableSchema instead" tp
-                                |> InvlaidXmlSchemaTypeException
-                                |> raise
+                                match getJsonContructor tp with 
+                                | Some jsonContructor -> 
+                                    FsObjectTypeCode.JsonPOCO jsonContructor
+                                    |> FsTypeCode.Object
+
+                                | _ -> 
+                                    sprintf "[Xml serializable] Un supported type %A, using FsXmlSerializableSchema instead" tp
+                                    |> InvlaidXmlSchemaTypeException
+                                    |> raise
 
                             | Some itp ->
                                 FsTypeCode.Object(FsObjectTypeCode.FsXmlSerializableTypeMapping)
@@ -761,14 +864,14 @@ module internal _Utils =
                 | TypeCode.Decimal -> "decimal"
                 | TypeCode.Boolean -> "boolean"
                 | TypeCode.DateTime -> "date"
+                | TypeCode.UInt64
+                | TypeCode.Int64 -> "long"
                 | TypeCode.Byte
-                | TypeCode.SByte 
+                | TypeCode.SByte -> "byte"
                 | TypeCode.UInt16 
                 | TypeCode.UInt32
-                | TypeCode.UInt64
                 | TypeCode.Int16
-                | TypeCode.Int32
-                | TypeCode.Int64 -> "int"
+                | TypeCode.Int32 -> "int"
                 | TypeCode.Empty -> "string"
                 | TypeCode.Object -> failwith "Invalid token"
 

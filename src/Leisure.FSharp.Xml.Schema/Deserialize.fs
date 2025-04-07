@@ -287,22 +287,35 @@ module internal rec _DeserializePart =
             let props = ResizeArray()
 
             advanceReaderFullElement(reader, fun stack ->
-                x.Zip3()
-                |> List.iter(fun (element, schemaType, propInfo) ->
+                let zipped = x.Zip3()
+                zipped
+                |> List.iteri(fun i (element, schemaType, propInfo) ->
                     let namedSchemaType =
                         { Name = Some (propInfo.Name)
                           FsSchemaType = schemaType }
 
                     let value = namedSchemaType.ReadValue(reader)
-                    advanceReader(reader)
-                    |> ignore
+                    match i = zipped.Length - 1 with 
+                    | true -> ()
+                    | false -> 
+                        advanceReader(reader)
+                        |> ignore
                     //let value = schemaType.ReadValue(reader)
                     props.Add(value)
                 )
             )
             |> ignore
 
-            FSharpValue.MakeRecord(x.Type, Array.ofSeq props)
+            match x.JsonPOCO with 
+            | None -> FSharpValue.MakeRecord(x.Type, Array.ofSeq props)
+            | Some jsonPOCO ->
+                match jsonPOCO.ZippedParameters.Length = props.Count with 
+                | true -> jsonPOCO.Constructor.Invoke(Array.ofSeq props)
+                | false ->
+                    failwithf 
+                        "[%A] paramters count mismatch %A" 
+                        jsonPOCO.Constructor.DeclaringType 
+                        (jsonPOCO.ZippedParameters.Length, props.Count)
 
     type FsSchemaComplexType_SingleCaseUnion with 
         member x.ReadValue(reader: ZippedXmlReader) =
@@ -591,6 +604,10 @@ module internal rec _DeserializePart =
 
             | false ->
                 let schemaTp = configuration.GetFsXmlSchemaType(tp)
+                match schemaTp.IsRecordEx() with 
+                | true -> advanceReader(reader) |> ignore
+                | false -> ()
+
                 schemaTp.ReadValue(reader)
                 |> unbox<'T>
 

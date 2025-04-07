@@ -287,6 +287,29 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
                                         failwithf "Invalid token, using FsXmlSerializableTypeMapping to instead %A" tp
                       
 
+                                    | FsObjectTypeCode.JsonPOCO jsonPoco ->
+                                        let props = Array.toList jsonPoco.Members
+
+                                        let elements, schemaTypes = 
+                                            props
+                                            |> List.map(fun prop ->
+                                                let propTp = prop.PropertyType 
+                                                let schemaType = loop propTp
+                                                let element = 
+                                                    schemaType.GenerateFsElement(Some prop.Name)
+
+                                                (element, schemaType)
+                                            )
+                                            |> List.unzip
+
+                                        { FsSchemaComplexType_Record.Elements = elements 
+                                          ElementSchemaTypes = schemaTypes
+                                          PropertyInfos = props
+                                          JsonPOCO = Some jsonPoco
+                                          Type = tp }
+                                        |> FsSchemaComplexType.Record
+                                        |> FsSchemaType.ComplexType
+
                                     | FsObjectTypeCode.Record ->
 
                                         let props = 
@@ -308,6 +331,7 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
                                         { FsSchemaComplexType_Record.Elements = elements 
                                           ElementSchemaTypes = schemaTypes
                                           PropertyInfos = props
+                                          JsonPOCO = None
                                           Type = tp }
                                         |> FsSchemaComplexType.Record
                                         |> FsSchemaType.ComplexType
@@ -420,7 +444,7 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
                     let tpCode = getFsTpCodeEx tp
                     r(tp)
                 | Some tpMapping -> 
-                    let schemaType = r(tpMapping.TargetType)
+                    let schemaType = loop(tpMapping.TargetType)
                     let schemaType =
                         { 
                             TypeMappingPair = tpMapping

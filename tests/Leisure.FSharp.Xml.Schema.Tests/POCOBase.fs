@@ -10,6 +10,7 @@ open System.Reflection
 open System.Diagnostics
 open Leisure.FSharp.Xml.Schema
 open System.Collections.Concurrent
+open Microsoft.FSharp.Reflection
 
 
 
@@ -179,6 +180,16 @@ with
 
 [<AutoOpen>]
 module private _POCOBaseUtils = 
+    [<RequireQualifiedAccess>]
+    type ConstructorInfoUnion =
+        | JsonCtr of ConstructorInfo
+        | GeneralCtr of ConstructorInfo
+    with 
+        member x.Value =
+            match x with 
+            | JsonCtr v -> v
+            | GeneralCtr v -> v
+
     let pocoBaseCtrCache = ConcurrentDictionary()
     let autoSerializationPOCOBaseCtrCache = ConcurrentDictionary()
 
@@ -248,35 +259,60 @@ type POCOBase<'T when 'T : equality and 'T : comparison> (pocoKey: 'T) =
 
         | false -> false
 
-    static member private GetCtr(tp: Type) =
-        pocoBaseCtrCache.GetOrAdd(tp, valueFactory = fun _ ->
-            match tp.GetConstructor([|typeof<'T>|]) with 
-            | null ->   
-                match tp.GetConstructors(BindingFlags.Instance ||| BindingFlags.NonPublic) with 
-                | null -> failwithf "[FsXMLSerialization] Constructor with param tp %s not exists" (typeof<'T>.FullName)
-                | ctrs -> 
-                    ctrs
-                    |> Array.tryFind(fun m -> 
-                        match m.GetParameters() with 
-                        | [|parameter|] -> 
-                            parameter.ParameterType = typeof<'T>
-                        | _ -> false
-                    )
-                    |> function
-                        | None -> failwithf "[FsXMLSerialization] Constructor with param tp %s not exists" (typeof<'T>.FullName)
-                        | Some ctr -> ctr
+    //static member private GetCtr(tp: Type) =
+    //    pocoBaseCtrCache.GetOrAdd(tp, valueFactory = fun _ ->
+    //        let privateCtrs = tp.GetConstructors(BindingFlags.Instance ||| BindingFlags.NonPublic)
+    //        let publicCtrs = tp.GetConstructors(BindingFlags.Instance ||| BindingFlags.Public)
 
-            | ctr -> ctr
-        )
+    //        let jsonContructor =
+    //            let ctrs = 
+    //                match privateCtrs, publicCtrs with 
+    //                | null, null -> [||]
+    //                | null, _ -> publicCtrs
+    //                | _, null -> privateCtrs
+    //                | _ -> Array.append (privateCtrs) publicCtrs
+
+    //            ctrs
+    //            |> Array.tryFind(fun m -> 
+    //                m.CustomAttributes
+    //                |> Seq.exists(fun m ->
+    //                    m.AttributeType = typeof<JsonConstructorAttribute>
+    //                )
+    //            )
+
+    //        match jsonContructor with 
+    //        | Some jsonContructor -> ConstructorInfoUnion.JsonCtr jsonContructor
+    //        | None -> 
+    //            match tp.GetConstructor([|typeof<'T>|]) with 
+    //            | null ->   
+    //                match privateCtrs with 
+    //                | null -> failwithf "[FsXMLSerialization] Constructor with param tp %s not exists" (typeof<'T>.FullName)
+    //                | ctrs -> 
+    //                    ctrs
+    //                    |> Array.tryFind(fun m -> 
+    //                        match m.GetParameters() with 
+    //                        | [|parameter|] -> 
+    //                            parameter.ParameterType = typeof<'T>
+    //                        | _ -> false
+    //                    )
+    //                    |> function
+    //                        | None -> 
+
+    //                            failwithf "[FsXMLSerialization] Constructor with param tp %s not exists" (typeof<'T>.FullName)
+    //                        | Some ctr -> ctr
+
+    //            | ctr -> ctr
+    //            |> ConstructorInfoUnion.GeneralCtr
+    //    )
         
 
-    static member ReadXml(tp: Type, reader: System.Xml.XmlReader, config: FsXmlSerializerConfiguration): POCOBase<'T> = 
-        let ctr = POCOBase<'T>.GetCtr(tp)
+    //static member ReadXml(tp: Type, reader: System.Xml.XmlReader, config: FsXmlSerializerConfiguration): POCOBase<'T> = 
+    //    let ctr = POCOBase<'T>.GetCtr(tp)
         
-        let pocoKey = FsXmlSerializer<_>.DeserializeXmlNodeValueTo(reader, typeof<'T>, config, name = None)
+    //    let pocoKey = FsXmlSerializer<_>.DeserializeXmlNodeValueTo(reader, typeof<'T>, config, name = None)
 
-        ctr.Invoke([|pocoKey|])
-        |> unbox<_>
+    //    ctr.Value.Invoke([|pocoKey|])
+    //    |> unbox<_>
       
     //interface FsIXmlSerializableSchema<POCOBase<'T>> with 
     //    member x.WriteXml (writer: System.Xml.XmlWriter, config: FsXmlSerializerConfiguration): unit = 
@@ -291,15 +327,42 @@ type POCOBase<'T when 'T : equality and 'T : comparison> (pocoKey: 'T) =
     //    static member SchemaType() = typeof<'T>
 
 
-    interface FsIXmlSerializableTypeMapping<POCOBase<'T>, 'T> with
-        member __.OfXml(tp: Type, v): POCOBase<'T> = 
-            let ctr = POCOBase<'T>.GetCtr(tp)
-            ctr.Invoke([|v|])
-            |> unbox<_>
+    //interface FsIXmlSerializableTypeMapping<POCOBase<'T>, obj> with
+    //    member __.OfXml(tp: Type, v): POCOBase<'T> = 
+    //        let ctr = POCOBase<'T>.GetCtr(tp)
+    //        match ctr with 
+    //        | ConstructorInfoUnion.GeneralCtr ctr ->
+    //            ctr.Invoke([|v|])
+    //            |> unbox<_>
+                
+    //        | ConstructorInfoUnion.JsonCtr ctr ->
+    //            let parameters = ctr.GetParameters()
+    //            match parameters with 
+    //            | [|_|] ->
 
-        member x.ToXml() = pocoKey
+    //                ctr.Invoke([|v|])
+    //                |> unbox<_>
+
+    //            | [||] -> failwithf "Not implemented"
+    //            | paramters ->
+    //                let tp = typeof<'T>
+    //                match FSharpType.IsTuple tp with 
+    //                | true -> 
+    //                    failwithf ""
+
+    //                | false -> failwithf "type %A should be tuple here" tp
+                
+
+    //    member x.ToXml() = 
+    //        let tp = x.GetType()
+    //        let ctr = POCOBase<'T>.GetCtr(tp)
+    //        match ctr with 
+    //        | ConstructorInfoUnion.GeneralCtr ctr -> pocoKey
+    //        | ConstructorInfoUnion.JsonCtr ctr ->
+    //            failwithf ""
+
             
-        member x.WrapOldName = true
+    //    member x.WrapOldName = true
 
     interface System.IComparable with 
         member x.CompareTo(y: obj) =
@@ -350,7 +413,38 @@ type POCOBaseV<'T when 'T : comparison> (v: 'T) =
 
     member x.VV = vv
 
+    static member private GetCtr(tp: Type) =
+        pocoBaseCtrCache.GetOrAdd(tp, valueFactory = fun _ ->
+            match tp.GetConstructor([|typeof<'T>|]) with 
+            | null ->   
+                match tp.GetConstructors(BindingFlags.Instance ||| BindingFlags.NonPublic) with 
+                | null -> failwithf "[FsXMLSerialization] Constructor with param tp %s not exists" (typeof<'T>.FullName)
+                | ctrs -> 
+                    ctrs
+                    |> Array.tryFind(fun m -> 
+                        match m.GetParameters() with 
+                        | [|parameter|] -> 
+                            parameter.ParameterType = typeof<'T>
+                        | _ -> false
+                    )
+                    |> function
+                        | None -> 
 
+                            failwithf "[FsXMLSerialization] Constructor with param tp %s not exists" (typeof<'T>.FullName)
+                        | Some ctr -> ctr
+
+            | ctr -> ctr
+        )
+
+    interface FsIXmlSerializableTypeMapping<POCOBaseV<'T>, 'T> with
+        member __.OfXml(tp: Type, v): POCOBaseV<'T> = 
+            let ctr = POCOBaseV<'T>.GetCtr(tp)
+            ctr.Invoke([|v|])
+            |> unbox<_>
+
+        member x.ToXml() = v
+            
+        member x.WrapOldName = true
 
 /// must be invoke SetPOCOKey after constructor then expression
 [<AbstractClass>]

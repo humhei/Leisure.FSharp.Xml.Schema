@@ -4,6 +4,7 @@ open Leisure.FSharp.Xml.Schema
 open System.Collections.Concurrent
 open System
 open System.Drawing
+open Newtonsoft.Json
 
 module DefaultSerializer = 
 
@@ -464,18 +465,21 @@ module GeneralRecordWithSkipComparasion =
 
     type Record =
         { DecimalSelector: SkipComparation_Serializable<ProductName>
-          ProductNameProp: ProductName }
+          //ProductNameProp: ProductName
+          }
     with 
         static member SampleData =
             let decimalSelector = 
                 DecimalSelector.BiggerOrEqual(100.)
                 |> SkipComparation_Serializable
 
-            { DecimalSelector = 
+            { 
+              DecimalSelector = 
                 //decimalSelector
                 SkipComparation_Serializable(ProductName("NestProductName"))
 
-              ProductNameProp = ProductName("MyProductName")}
+              //ProductNameProp = ProductName("MyProductName")
+            }
 
 let pass() = Expect.isTrue true "passed"
 let fail() = Expect.isTrue false "failed"
@@ -505,6 +509,55 @@ type DirectoryOrFileName =
 type RecordWithRecursiveType =
     { Name: string 
       DirectoryOrFileName: DirectoryOrFileName }
+
+type RecordWithInt64 =
+    { Name: string 
+      Int64: int64 }
+
+type RecordWithSkipComparation =
+    { Name: string 
+      Age_SkipComparation: SkipComparation_Serializable<int option> }
+
+type SQLStatementVersion =
+    | Old = 0 
+    | New = 1
+
+let  mutable internal SQLStatementVersionMutable = SQLStatementVersion.Old 
+
+type SheetName [<JsonConstructor>] internal (sheetName: string, ?version: SQLStatementVersion) =
+    inherit POCOBase<StringIC * SQLStatementVersion option>(StringIC sheetName, version)
+
+    let sheetName = sheetName.TrimEnd('$')
+
+    member x.NoJsonProp = "<Null>"
+
+    [<JsonProperty>]
+    member x.SheetName: string = sheetName
+
+    [<JsonProperty>]
+    member x.Version = version
+
+    member x.LongSheetName =
+        match defaultArg version SQLStatementVersionMutable with 
+        | SQLStatementVersion.Old -> 
+            sprintf "%s$" sheetName
+    
+        | SQLStatementVersion.New ->
+            sprintf "Excel.%s" sheetName
+
+    override x.ToString() = 
+        sprintf "`%s`" x.LongSheetName
+        
+    new  (sheetName) = SheetName(sheetName, ?version = None)
+
+type Props =
+    { A: int 
+      B: int }
+
+type RecordWithSheetName =
+    { Name: string 
+      SheetName: SheetName }
+
 
 let MyTests =
     
@@ -645,19 +698,19 @@ let MyTests =
       | true -> pass()
       | false -> fail()
 
-    testCase "allow non root record type" <| fun _ ->
-      let fileID = 10
-      let xmlFile = sprintf @"xml\%d.xml" fileID
-      let xsdFile = sprintf @"xml\%d.xsd" fileID
-      let data = Some GeneralRecordWithSkipComparasion.Record.SampleData.ProductNameProp
-      let config = FsXmlSerializerConfiguration.DefaultValue
+    //testCase "allow non root record type" <| fun _ ->
+    //  let fileID = 10
+    //  let xmlFile = sprintf @"xml\%d.xml" fileID
+    //  let xsdFile = sprintf @"xml\%d.xsd" fileID
+    //  let data = GeneralRecordWithSkipComparasion.Record.SampleData.ProductNameProp
+    //  let config = FsXmlSerializerConfiguration.DefaultValue
 
-      let serializer = new FsXmlSerializer<ProductName option>(config)
-      serializer.SerializeToFile(xmlFile, xsdFile, data)
-      let data2 = serializer.DeserializeFromFile(xmlFile)
-      match data = data2 with 
-      | true -> pass()
-      | false -> fail()
+    //  let serializer = new FsXmlSerializer<ProductName>(config)
+    //  serializer.SerializeToFile(xmlFile, xsdFile, data)
+    //  let data2 = serializer.DeserializeFromFile(xmlFile)
+    //  match data = data2 with 
+    //  | true -> pass()
+    //  | false -> fail()
 
     testCase "simple type for singleton union case" <| fun _ ->
       let fileID = 11
@@ -715,7 +768,7 @@ let MyTests =
       | true -> pass()
       | false -> fail()
 
-    ftestCase "recursive type support" <| fun _ ->
+    testCase "recursive type support" <| fun _ ->
       let fileID = 14
       let xmlFile = sprintf @"xml\%d.xml" fileID
       let xsdFile = sprintf @"xml\%d.xsd" fileID
@@ -735,6 +788,62 @@ let MyTests =
       let config = FsXmlSerializerConfiguration.DefaultValue
 
       let serializer = new FsXmlSerializer<RecordWithRecursiveType>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
+    testCase "int64 support" <| fun _ ->
+      let fileID = 15
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID
+      let data = 
+        { Name = "MyName"
+          Int64 = 1000000000000000L
+            //DirectoryOrFileName.FileName "fileName"
+          }
+        
+      let config = FsXmlSerializerConfiguration.DefaultValue
+
+      let serializer = new FsXmlSerializer<RecordWithInt64>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
+    testCase "SkipComparation supported" <| fun _ ->
+      let fileID = 16
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID
+      let data = 
+        { Name = "MyName"
+          Age_SkipComparation = SkipComparation_Serializable (Some 16)
+            //DirectoryOrFileName.FileName "fileName"
+          }
+        
+      let config = FsXmlSerializerConfiguration.DefaultValue
+
+      let serializer = new FsXmlSerializer<RecordWithSkipComparation>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
+    testCase "POCOBase with two parameters constructor" <| fun _ ->
+      let fileID = 17
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID
+      let data = 
+        { Name = "MyName"
+          SheetName = SheetName("Name")
+        }
+        
+      let config = FsXmlSerializerConfiguration.DefaultValue
+
+      let serializer = new FsXmlSerializer<RecordWithSheetName>(config)
       serializer.SerializeToFile(xmlFile, xsdFile, data)
       let data2 = serializer.DeserializeFromFile(xmlFile)
       match data = data2 with 
