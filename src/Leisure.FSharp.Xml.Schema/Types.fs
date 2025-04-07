@@ -25,6 +25,18 @@ type UnionTagOptions =
     | Independent = 0
     | SuffixToRootType = 1
 
+[<System.AttributeUsage(AttributeTargets.Property)>]
+type FsXmlSchemaIgnoreAttribute() =
+    inherit System.Attribute()
+
+type FsXmlSchemaIgnoreInfo =
+    { PropertyInfo: PropertyInfo
+      RootType: Type
+      PropertyType: Type }
+with 
+    member x.ToSchema() =
+        failwith "Invalid token"
+
 type FsXmlShemaRestriction =
     { MinInclusive: float option 
       MaxInclusive: float option }
@@ -1179,6 +1191,30 @@ module private _Util2 =
     let private getReadXmlObjMethodCache = ConcurrentDictionary()
     let private getSimpleTypeCache = ConcurrentDictionary()
     let private getListRestrictionCache = ConcurrentDictionary()
+    let private getIgnoreInfoCache = ConcurrentDictionary()
+
+    let getIgnoreInfo(prop: PropertyInfo) =
+        getIgnoreInfoCache.GetOrAdd(prop, valueFactory = fun _ ->
+            let ignoreAttr =
+                prop.CustomAttributes
+                |> Seq.tryFind(fun m -> 
+                    m.AttributeType = typeof<FsXmlSchemaIgnoreAttribute>
+                )
+
+            match ignoreAttr with 
+            | None -> None
+
+            | Some _ ->     
+                let ignoreInfo: FsXmlSchemaIgnoreInfo =
+                    { 
+                        PropertyInfo = prop
+                        PropertyType = prop.PropertyType
+                        RootType = prop.DeclaringType
+                    }
+
+                Some ignoreInfo
+        )
+
 
     let getListRestriction(tp: Type) =
         getListRestrictionCache.GetOrAdd(tp, valueFactory = fun _ ->

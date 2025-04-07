@@ -333,6 +333,10 @@ module internal rec _SerializePart =
     type FsSchemaType with 
         member x.WriteValue(writer: ZippedXmlWriter, value: obj) =
             match x with 
+            | FsSchemaType.Ignore ignoreInfo ->
+                writer.WriteAttributeString("nil", W3XMLSchemaInstance, "true")
+                //()
+
             | FsSchemaType.SimpleType v -> v.WriteValue(writer, value)
             | FsSchemaType.ComplexType v -> v.WriteValue(writer, value)
             | FsSchemaType.Option v ->
@@ -400,15 +404,17 @@ module internal rec _SerializePart =
             x.WriteW3CAttributeString_xsi_xsd(writer)
             match FSharpType.IsRecord tp with 
             | true ->
-                let props = FSharpType.GetRecordFields tp
-                for prop in props do 
-                    let propValue = prop.GetValue(value)
-                    let propTp =
-                        let fsSchemaType = configuration.GetFsXmlSchemaType(prop.PropertyType)
-                        { Name = Some prop.Name 
-                          FsSchemaType = fsSchemaType }
+                let tp = configuration.GetFsXmlSchemaType(tp)
+                tp.WriteValue(writer, value)
+                //let props = FSharpType.GetRecordFields tp
+                //for prop in props do 
+                //    let propValue = prop.GetValue(value)
+                //    let propTp =
+                //        let fsSchemaType = configuration.GetFsXmlSchemaType(prop.PropertyType)
+                //        { Name = Some prop.Name 
+                //          FsSchemaType = fsSchemaType }
 
-                    FsXmlSerializer_SerializePart<_>.SerializeValue(writer, propTp, propValue)
+                //    FsXmlSerializer_SerializePart<_>.SerializeValue(writer, propTp, propValue)
                 
 
             | false -> 

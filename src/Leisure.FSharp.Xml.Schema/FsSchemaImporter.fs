@@ -320,11 +320,21 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
                                             props
                                             |> List.map(fun prop ->
                                                 let propTp = prop.PropertyType 
-                                                let schemaType = loop propTp
-                                                let element = 
-                                                    schemaType.GenerateFsElement(Some prop.Name)
+                                                match getIgnoreInfo prop with 
+                                                | None -> 
+                                                //match ignoreAttr with 
+                                                //| None -> 
 
-                                                (element, schemaType)
+                                                    let schemaType = loop propTp
+                                                    let element = 
+                                                        schemaType.GenerateFsElement(Some prop.Name)
+
+                                                    (element, schemaType)
+
+                                                | Some ignoreInfo ->     
+                                                    let schemaType = FsSchemaType.Ignore ignoreInfo
+                                                    let element = schemaType.GenerateFsElement(Some prop.Name)
+                                                    element, schemaType
                                             )
                                             |> List.unzip
 
@@ -488,12 +498,18 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
                 Name = "SCase"
             )
 
+        let ignoreType =
+            XmlSchemaComplexType(
+                Name = "Ignore"
+            )
+
         let typeElements = 
             typeElements.Values
             |> List.ofSeq
             |> List.sortBy(fun m -> m.Index)
             |> List.collect(fun m -> 
                 match m.XmlSchemaType with 
+                | FsSchemaType.Ignore _ -> []
                 | FsSchemaType.Option _ -> []
                 | _ ->
                     match m.XmlSchemaType.GetAsGeneric() with 
@@ -506,7 +522,7 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
             |> List.map(fun m -> m :> XmlSchemaObject)
         
 
-        rootElement :: typeElements @ [(*entryType; *)scaseType]
+        rootElement :: typeElements @ [(*entryType; *)scaseType; ignoreType]
 
     member x.ImportTp(tp: Type) =
         let xmlSchema = XmlSchema(ElementFormDefault = XmlSchemaForm.Qualified)

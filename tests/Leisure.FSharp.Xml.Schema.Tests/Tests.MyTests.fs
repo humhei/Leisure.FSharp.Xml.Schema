@@ -558,6 +558,11 @@ type RecordWithSheetName =
     { Name: string 
       SheetName: SheetName }
 
+type RecordWithIgnoreProp =
+    { Name: string 
+      [<FsXmlSchemaIgnore>]
+      IgnoreProp: SheetName }
+
 
 let MyTests =
     
@@ -847,6 +852,25 @@ let MyTests =
       serializer.SerializeToFile(xmlFile, xsdFile, data)
       let data2 = serializer.DeserializeFromFile(xmlFile)
       match data = data2 with 
+      | true -> pass()
+      | false -> fail()
+
+    ftestCase "Record with IgnoreAttribute" <| fun _ ->
+      let fileID = 18
+      let xmlFile = sprintf @"xml\%d.xml" fileID
+      let xsdFile = sprintf @"xml\%d.xsd" fileID
+
+      let data = 
+        { Name = "MyName"
+          IgnoreProp = SheetName("Name")
+        }
+        
+      let config = FsXmlSerializerConfiguration.DefaultValue
+
+      let serializer = new FsXmlSerializer<RecordWithIgnoreProp>(config)
+      serializer.SerializeToFile(xmlFile, xsdFile, data)
+      let data2 = serializer.DeserializeFromFile(xmlFile)
+      match { data with IgnoreProp = Unchecked.defaultof<_> } = data2 with 
       | true -> pass()
       | false -> fail()
 

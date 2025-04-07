@@ -279,8 +279,6 @@ module internal rec _DeserializePart =
             | FsSchemaComplexGenericType.Dictionary v -> v.ReadValue(reader)
             | FsSchemaComplexGenericType.Tuple v -> v.ReadValue(reader)
                 
-                
-            | _ -> failwithf "Not implemented"
 
     type FsSchemaComplexType_Record with 
         member x.ReadValue(reader: ZippedXmlReader) =
@@ -438,8 +436,6 @@ module internal rec _DeserializePart =
             | FsSchemaComplexType.SinglecaseUnion v -> v.ReadValue(reader)
             | FsSchemaComplexType.Union v -> v.ReadValue(reader)
 
-            | _ -> failwithf "Not implemented"
-
     type MappedFsSchemaType with 
         member x.ReadValue(reader: ZippedXmlReader) =
             match x.WrapOldName with 
@@ -513,7 +509,12 @@ module internal rec _DeserializePart =
                 | Some schemaType ->
                     schemaType.ReadValue(reader)
 
-            | _ -> failwithf "Not implemented"
+            | FsSchemaType.Ignore ignoreInfo ->
+                reader.Read() |> ignore
+                null
+                //let r = createDefaultObject(ignoreInfo.PropertyType)
+                //failwith ""
+            //| _ -> failwithf "Not implemented"
 
 
     type NamedFsSchemaType with
@@ -564,52 +565,61 @@ module internal rec _DeserializePart =
             //    | true -> ()
             //    | false -> failwithf "Root type should be fsharp record"
 
-            match FSharpType.IsRecord tp with 
-            | true ->
-                let props = FSharpType.GetRecordFields tp
 
-                let props = props
-                let rec loop accum =
-                    match advanceReader(reader) with 
-                    | true -> 
-                        match reader.NodeType with 
-                        | XmlNodeType.Element -> 
-                            let prop = 
-                                props
-                                |> Array.find(fun m -> m.Name = reader.Name)
+            let schemaTp = configuration.GetFsXmlSchemaType(tp)
+            match schemaTp.IsRecordEx() with 
+            | true -> advanceReader(reader) |> ignore
+            | false -> ()
 
-                            let propTp = 
-                                { Name = Some prop.Name 
-                                  FsSchemaType = configuration.GetFsXmlSchemaType(prop.PropertyType) }
+            schemaTp.ReadValue(reader)
+            |> unbox<'T>
 
-                            let propValue = FsXmlSerializer_DeserializePart<_>.DeserializeToProp(reader, propTp)
-                            loop (propValue :: accum) 
+            //match FSharpType.IsRecord tp with 
+            //| true ->
+            //    let props = FSharpType.GetRecordFields tp
 
-                        | _ -> failwithf "Not implemented"
+            //    let props = props
+            //    let rec loop accum =
+            //        match advanceReader(reader) with 
+            //        | true -> 
+            //            match reader.NodeType with 
+            //            | XmlNodeType.Element -> 
+            //                let prop = 
+            //                    props
+            //                    |> Array.find(fun m -> m.Name = reader.Name)
 
-                    | false -> List.rev accum
+            //                let propTp = 
+            //                    { Name = Some prop.Name 
+            //                      FsSchemaType = configuration.GetFsXmlSchemaType(prop.PropertyType) }
 
-                advanceReader(reader) |> ignore
-                match reader.Name = tp.Name || reader.Name + "_XMLSchema" = tp.Name with 
-                | true -> 
-                    reader.Read() |> ignore
-                    |> ignore
+            //                let propValue = FsXmlSerializer_DeserializePart<_>.DeserializeToProp(reader, propTp)
+            //                loop (propValue :: accum) 
 
-                | false -> failwithf "Invalid token, reader.Name %s should be record type name %s here" reader.Name tp.Name
+            //            | _ -> failwithf "Not implemented"
+
+            //        | false -> List.rev accum
+
+            //    advanceReader(reader) |> ignore
+            //    match reader.Name = tp.Name || reader.Name + "_XMLSchema" = tp.Name with 
+            //    | true -> 
+            //        reader.Read() |> ignore
+            //        |> ignore
+
+            //    | false -> failwithf "Invalid token, reader.Name %s should be record type name %s here" reader.Name tp.Name
 
 
-                let props = loop []
-                FSharpValue.MakeRecord(tp, List.toArray props)
-                |> unbox<'T>
+            //    let props = loop []
+            //    FSharpValue.MakeRecord(tp, List.toArray props)
+            //    |> unbox<'T>
 
-            | false ->
-                let schemaTp = configuration.GetFsXmlSchemaType(tp)
-                match schemaTp.IsRecordEx() with 
-                | true -> advanceReader(reader) |> ignore
-                | false -> ()
+            //| false ->
+            //    let schemaTp = configuration.GetFsXmlSchemaType(tp)
+            //    match schemaTp.IsRecordEx() with 
+            //    | true -> advanceReader(reader) |> ignore
+            //    | false -> ()
 
-                schemaTp.ReadValue(reader)
-                |> unbox<'T>
+            //    schemaTp.ReadValue(reader)
+            //    |> unbox<'T>
 
         member x.DeserializeFromFile(fileName: string) =
             

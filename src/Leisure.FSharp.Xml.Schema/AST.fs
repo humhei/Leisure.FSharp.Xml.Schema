@@ -57,6 +57,7 @@ module internal rec FsSchemaTypesAST =
           Name: PropNameOrElementName
           SchemaTypeOrSchemaTypeName: FsSchemaTypeOrSchemaTypeName
           SimpleTypeInfo: FsXmlSchemaSimpleType option
+          IgnoreInfo: FsXmlSchemaIgnoreInfo option
         }
 
     with 
@@ -90,8 +91,15 @@ module internal rec FsSchemaTypesAST =
                 | None -> 
                     match x.SchemaTypeOrSchemaTypeName with 
                     | FsSchemaTypeOrSchemaTypeName.SchemaTypeName tpName -> 
-                        element.SchemaTypeName <- tpName
-                        element
+                        match x.IgnoreInfo with 
+                        | Some _ -> 
+                            element.SchemaTypeName <- XmlQualifiedName "Ignore"
+                            element.IsNillable <- true
+                            element
+
+                        | None -> 
+                            element.SchemaTypeName <- tpName
+                            element
 
                     | FsSchemaTypeOrSchemaTypeName.SchemaType tp ->
                         let schemas =  tp.ToSchemas()
@@ -526,7 +534,8 @@ module internal rec FsSchemaTypesAST =
                 { IsOption = false 
                   SchemaTypeOrSchemaTypeName = FsSchemaTypeOrSchemaTypeName.SchemaTypeName tpName
                   Name = PropNameOrElementName.PropName uci.Name
-                  SimpleTypeInfo = None }
+                  SimpleTypeInfo = None
+                  IgnoreInfo = None }
 
 
             { UnionCase = uci 
@@ -1052,6 +1061,7 @@ module internal rec FsSchemaTypesAST =
                         IsOption = false
                         SchemaTypeOrSchemaTypeName = innerSchemas
                         SimpleTypeInfo = None
+                        IgnoreInfo = None
                     }
 
                 let element = fsSchemaElement.ToSchema()
@@ -1078,6 +1088,7 @@ module internal rec FsSchemaTypesAST =
         | SimpleType of FsSchemaSimpleType
         | MappedType of MappedFsSchemaType
         | Recursive of System.Type * FsSchemaType option
+        | Ignore of FsXmlSchemaIgnoreInfo
 
     with 
 
@@ -1096,6 +1107,7 @@ module internal rec FsSchemaTypesAST =
 
         member private x.MapSubSchemaType(f) =
             match x with 
+            | Ignore _ -> x
             | SimpleType _ -> x
             | Option v -> 
                 Option(v.MapSubSchemaType f)
@@ -1293,6 +1305,7 @@ module internal rec FsSchemaTypesAST =
 
         member x.GetAsGeneric() =
             match x with 
+            | Ignore _ -> None
             | SimpleType _ -> None
             | Option v -> v.GetAsGeneric()
             | ComplexType v -> v.GetAsGeneric()
@@ -1317,6 +1330,7 @@ module internal rec FsSchemaTypesAST =
 
         member x.ToSchemas(): XmlSchemaType list =
             match x with 
+            | Ignore ignoreInfo -> ignoreInfo.ToSchema()
             | SimpleType v -> v.ToSchema() |> Option.toList
             | Option v -> v.ToSchemas()
             | ComplexType v ->  
@@ -1341,11 +1355,16 @@ module internal rec FsSchemaTypesAST =
                 | Option tp -> tp.GetElementName()
                 | MappedType (tp) -> tp.GetElementName()
                 | Recursive (tp, _) -> tp.Name
-
+                | Ignore ignoreInfo -> ignoreInfo.PropertyType.Name
             name
 
         member x.GetSchemaTypeOrSchemaTypeName(): FsSchemaTypeOrSchemaTypeName = 
             match x with 
+            | Ignore ignoreInfo -> 
+                ignoreInfo.PropertyType.Name
+                |> XmlQualifiedName
+                |> FsSchemaTypeOrSchemaTypeName.SchemaTypeName
+
             | SimpleType tp -> tp.GetSchemaTypeOrSchemaTypeName()
             | ComplexType tp -> tp.GetSchemaTypeOrSchemaTypeName()
             | Option tp -> tp.GetSchemaTypeOrSchemaTypeName()
@@ -1368,6 +1387,10 @@ module internal rec FsSchemaTypesAST =
                   Name = name 
                   SchemaTypeOrSchemaTypeName = x.GetSchemaTypeOrSchemaTypeName()
                   SimpleTypeInfo = None 
+                  IgnoreInfo = 
+                    match x with 
+                    | FsSchemaType.Ignore ignoreInfo -> Some ignoreInfo
+                    | _ -> None
                 }
 
 
