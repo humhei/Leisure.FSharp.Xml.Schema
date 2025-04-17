@@ -404,8 +404,6 @@ module internal rec _DeserializePart =
                 | XmlNodeType.EndElement ->
                     //reader.Read()
                     //|> ignore
-                    advanceReader reader
-                    |> ignore
 
                     x.Elements
                     |> List.iter(fun _ ->

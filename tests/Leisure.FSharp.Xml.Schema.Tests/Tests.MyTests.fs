@@ -580,9 +580,9 @@ type RecordWithIgnoreProp =
 type RecordWithIgnoreProp2 =
         { 
           Name: string 
+          Age: RecordWithIgnoreProp
           [<FsXmlSchemaIgnore>]
           ``IgnoreProp2,5``: SheetName
-          Age: RecordWithIgnoreProp
         }
 
 type RecordWithIgnoreProp3 =
@@ -885,7 +885,7 @@ let MyTests =
       | true -> pass()
       | false -> fail()
 
-    testCase "Record with IgnoreAttribute" <| fun _ ->
+    ftestCase "Record with IgnoreAttribute" <| fun _ ->
       let fileID = 18
       let xmlFile = sprintf @"xml\%d.xml" fileID
       let xsdFile = sprintf @"xml\%d.xsd" fileID
@@ -899,7 +899,7 @@ let MyTests =
                   ``IgnoreProp2,5`` = SheetName("Name")
                   Age = 
                       {
-                         Age = None
+                         Age = Some 6
                          Age2 = None
                       }
                 }
