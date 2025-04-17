@@ -25,6 +25,26 @@ type UnionTagOptions =
     | Independent = 0
     | SuffixToRootType = 1
 
+type IgnoreInfoXmlWritingOptions =
+    | MinOccurs_Zero = 0
+    | DeleteAll = 1
+    | Keep = 2
+
+type FSharpOptionRevealWay =
+    | Reveal = 0
+    | AlwaysHideInXml = 1
+
+[<RequireQualifiedAccess>]
+module  FSharpOptionRevealWay =
+    /// FSharpOptionRevealWay.AlwaysHideInXml
+    let [<Literal>] DefaultValue = FSharpOptionRevealWay.AlwaysHideInXml
+
+[<RequireQualifiedAccess>]
+module IgnoreInfoXmlWritingOptions =  
+    /// IgnoreInfoXmlWritingOptions.DeleteAll
+    let [<Literal>] DefaultValue = IgnoreInfoXmlWritingOptions.DeleteAll
+
+
 [<System.AttributeUsage(AttributeTargets.Property)>]
 type FsXmlSchemaIgnoreAttribute() =
     inherit System.Attribute()
@@ -32,14 +52,21 @@ type FsXmlSchemaIgnoreAttribute() =
 type FsXmlSchemaIgnoreInfo =
     { PropertyInfo: PropertyInfo
       RootType: Type
+      IgnoreInfoXmlWritingOptions: IgnoreInfoXmlWritingOptions
       PropertyType: Type }
 with 
+    member x.IgnoreInfo_MinOccurs_Zero__OR__DeleteAll =
+        match x.IgnoreInfoXmlWritingOptions with 
+        | IgnoreInfoXmlWritingOptions.MinOccurs_Zero 
+        | IgnoreInfoXmlWritingOptions.DeleteAll -> true
+        | IgnoreInfoXmlWritingOptions.Keep -> false
+
     member x.ToSchema() =
         failwith "Invalid token"
 
 type FsXmlShemaRestriction =
-    { MinInclusive: float option 
-      MaxInclusive: float option }
+    { MinInclusive: decimal option 
+      MaxInclusive: decimal option }
 with 
     static member private Empty =
         { MinInclusive = None 
@@ -144,12 +171,16 @@ type FsXmlSerializerTypeMapping =
 
 type IFsSchemaType = interface end
 
+
 type FsXmlSerializerConfiguration =
     internal
         { TypeMapping: Dictionary<Type, FsXmlSerializerTypeMapping>
           FsIXmlSerializableTypeMappingCache:  ConcurrentDictionary<Type, FsXmlSerializerTypeMapping option>
           FsSchemaTypeCache: ConcurrentDictionary<Type, IFsSchemaType>
-          UnionTagOptions: UnionTagOptions }
+          UnionTagOptions: UnionTagOptions
+          IgnoreInfoXmlWritingOptions: IgnoreInfoXmlWritingOptions
+          FSharpOptionRevealWay: FSharpOptionRevealWay
+        }
 with 
     member x.AddTypeMapping<'Origin, 'Target>(toXml: 'Origin -> 'Target, ofXml: 'Target -> 'Origin, ?wrapOldName) =
         let __checkConversionValid =
@@ -201,6 +232,8 @@ with
           FsIXmlSerializableTypeMappingCache = ConcurrentDictionary() 
           FsSchemaTypeCache = ConcurrentDictionary()
           UnionTagOptions = UnionTagOptions.SuffixToRootType
+          IgnoreInfoXmlWritingOptions = IgnoreInfoXmlWritingOptions.DefaultValue
+          FSharpOptionRevealWay = FSharpOptionRevealWay.DefaultValue
         }
 
     member internal x.UpdateTypeAndValue_ToXml(tp: Type, value: obj) =
@@ -1210,6 +1243,7 @@ module private _Util2 =
                         PropertyInfo = prop
                         PropertyType = prop.PropertyType
                         RootType = prop.DeclaringType
+                        IgnoreInfoXmlWritingOptions = IgnoreInfoXmlWritingOptions.DeleteAll
                     }
 
                 Some ignoreInfo

@@ -198,7 +198,7 @@ type FsXmlSerializer<'T>(configuration: FsXmlSerializerConfiguration) =
         schemas.Write(tw)
 
 
-    member x.SerializeToFile(xmlPath: string, xsdPath: string, value: 'T) =
+    member x.SerializeToFile(xmlPath: string, xsdPath: string, value: 'T, ?xsdSubDirLocation) =
         x.File_WriteFsXsd(xsdPath)
         x.File_TrimXsdSchemaEnd(xsdPath)
-        serializer_part.SerializeToFile(xmlPath, xsdPath, value)
+        serializer_part.SerializeToFile(xmlPath, xsdPath, value, ?xsdSubDirLocation = xsdSubDirLocation)

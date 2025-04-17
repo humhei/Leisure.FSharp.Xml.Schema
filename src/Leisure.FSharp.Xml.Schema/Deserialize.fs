@@ -43,6 +43,33 @@ module internal rec _DeserializePart =
             | false -> false
 
         loop()
+
+    let advanceReader_tillSkip_FirstEndElement(reader: ZippedXmlReader) =
+        let reader = reader.Reader
+        let rec loop () =
+            match reader.Read() with 
+            | true -> 
+                match reader.NodeType with 
+                | XmlNodeType.EndElement -> 
+                    let rec loop222 () =
+                        match reader.Read() with 
+                        | true -> 
+                            match reader.NodeType with
+                            | XmlNodeType.XmlDeclaration -> loop222 ()
+                            | XmlNodeType.Whitespace -> loop222 ()
+                            | _ -> true
+
+                        | false -> false
+
+                    loop222()
+
+                | XmlNodeType.XmlDeclaration -> loop ()
+                | XmlNodeType.Whitespace -> loop ()
+                | _ -> true
+
+            | false -> false
+
+        loop()
        
     let advanceReaderFullElement(reader: ZippedXmlReader, fElement) =
         let reader = reader.Reader
@@ -52,9 +79,9 @@ module internal rec _DeserializePart =
             match reader.Read() with 
             | true -> 
                 let goEnd(stack) =
-                    let newStack = (stack-1)
-                    assert(newStack >= 0)
-                    match newStack with 
+                    //let newStack = (stack-1)
+                    assert(stack >= 0)
+                    match stack with 
                     | 0 -> 
                         match reader.Name = name with 
                         | true -> true
@@ -89,7 +116,7 @@ module internal rec _DeserializePart =
 
             | false -> false
 
-        loop 1
+        loop 0
 
     let advanceReaderFullElement_GetElement(reader: ZippedXmlReader, fElement) =
         let mutable value = None
@@ -194,6 +221,7 @@ module internal rec _DeserializePart =
                         reader,
                         elementTp
                     )
+
                 elements.Add(prop)
             ) |> ignore
                         
@@ -284,28 +312,139 @@ module internal rec _DeserializePart =
         member x.ReadValue(reader: ZippedXmlReader) =
             let props = ResizeArray()
 
+            let zipped = x.Zip3()
             advanceReaderFullElement(reader, fun stack ->
-                let zipped = x.Zip3()
-                zipped
-                |> List.iteri(fun i (element, schemaType, propInfo) ->
+                let rec read() =
+                    let (element, schemaType, propInfo) = zipped.[props.Count]
                     let namedSchemaType =
                         { Name = Some (propInfo.Name)
                           FsSchemaType = schemaType }
 
-                    let value = namedSchemaType.ReadValue(reader)
-                    match i = zipped.Length - 1 with 
-                    | true -> ()
-                    | false -> 
-                        advanceReader(reader)
-                        |> ignore
-                    //let value = schemaType.ReadValue(reader)
-                    props.Add(value)
-                )
+                    match namedSchemaType.FsSchemaType with 
+                    | FsSchemaType.Ignore ignoreInfo when ignoreInfo.IgnoreInfo_MinOccurs_Zero__OR__DeleteAll ->
+                        let value = null
+                        props.Add(value)
+                        read()
+                    | _ -> 
+                        let readValue() =
+                            let value = namedSchemaType.ReadValue(reader)
+                            //advanceReader_tillSkip_FirstEndElement(reader)
+                            //|> ignore
+                            //match i = zipped.Length - 1 with 
+                            //| true -> ()
+                            //| false -> 
+                            //    advanceReader_tillSkip_FirstEndElement(reader)
+                            //    |> ignore
+                            //let value = schemaType.ReadValue(reader)
+                            props.Add(value)
+                        
+                        match element.FSharpOptionRevealWay with 
+                        | Some FSharpOptionRevealWay.AlwaysHideInXml ->
+                            let isNull = reader.Name <> propInfo.Name || reader.Name = ""
+                            match isNull with 
+                            | true -> 
+                                let value = null
+                                props.Add(value)
+                                read()
+
+                            | false -> readValue()
+
+                        | _ -> readValue()
+
+
+                read()
+                //zipped
+                //|> List.iteri(fun i (element, schemaType, propInfo) ->
+                //    let namedSchemaType =
+                //        { Name = Some (propInfo.Name)
+                //          FsSchemaType = schemaType }
+
+                //    match namedSchemaType.FsSchemaType with 
+                //    | FsSchemaType.Ignore ignoreInfo when ignoreInfo.IgnoreInfo_MinOccurs_Zero__OR__DeleteAll ->
+                //        let value = null
+                //        props.Add(value)
+
+                //    | _ -> 
+                //        let readValue() =
+                //            let value = namedSchemaType.ReadValue(reader)
+                //            //advanceReader_tillSkip_FirstEndElement(reader)
+                //            //|> ignore
+                //            //match i = zipped.Length - 1 with 
+                //            //| true -> ()
+                //            //| false -> 
+                //            //    advanceReader_tillSkip_FirstEndElement(reader)
+                //            //    |> ignore
+                //            //let value = schemaType.ReadValue(reader)
+                //            props.Add(value)
+                            
+                //        match element.FSharpOptionRevealWay with 
+                //        | Some FSharpOptionRevealWay.AlwaysHideInXml ->
+                //            let isNull = reader.Name <> propInfo.Name || reader.Name = ""
+                //            match isNull with 
+                //            | true -> 
+                //                let value = null
+                //                props.Add(value)
+
+                //            | false -> readValue()
+
+                //        | _ -> readValue()
+
+
+                //    ()
+                //)
             )
             |> ignore
 
+
+
+            match props.Count with 
+            | 0 ->
+                match reader.Reader.NodeType with 
+                | XmlNodeType.None 
+                | XmlNodeType.EndElement ->
+                    //reader.Read()
+                    //|> ignore
+                    advanceReader reader
+                    |> ignore
+
+                    x.Elements
+                    |> List.iter(fun _ ->
+                        props.Add(null)
+                    )
+
+
+                | _ -> ()
+
+            | _ -> 
+                match props.Count < x.PropertyInfos.Length with 
+                | false -> ()
+                | true ->
+                    let left = zipped.[props.Count..]
+                    left
+                    |> List.iter(fun (element, fsSchemaType, _) ->
+                        match fsSchemaType with 
+                        | FsSchemaType.Ignore ignoreInfo when ignoreInfo.IgnoreInfo_MinOccurs_Zero__OR__DeleteAll ->
+                            props.Add(null)
+
+                        | _ ->
+                            match element.FSharpOptionRevealWay with 
+                            | Some FSharpOptionRevealWay.AlwaysHideInXml -> props.Add(null)
+                            | _ -> ()
+
+                    )
+
+
             match x.JsonPOCO with 
-            | None -> FSharpValue.MakeRecord(x.Type, Array.ofSeq props)
+            | None ->   
+                let tp = x.Type.FullName
+                match props.Count = x.PropertyInfos.Length with 
+                | true -> FSharpValue.MakeRecord(x.Type, Array.ofSeq props)
+                | false ->
+                    failwithf 
+                        "[%A] paramters count mismatch %A" 
+                        x.Type
+                        (x.PropertyInfos.Length, props.Count)
+
             | Some jsonPOCO ->
                 match jsonPOCO.ZippedParameters.Length = props.Count with 
                 | true -> jsonPOCO.Constructor.Invoke(Array.ofSeq props)
@@ -393,7 +532,7 @@ module internal rec _DeserializePart =
                 let name = reader.Name
                 let uci = 
                     x.UnionCases
-                    |> List.find(fun m -> m.UnionCase.Name = name)
+                    |> List.find(fun m -> PropNameOrElementName.FixPropName m.UnionCase.Name = name)
 
 
                 let value = 
@@ -467,7 +606,7 @@ module internal rec _DeserializePart =
             match x with 
             | FsSchemaType.SimpleType v -> v.ReadValue(reader)
             | FsSchemaType.ComplexType v -> v.ReadValue(reader)
-            | FsSchemaType.Option v -> 
+            | FsSchemaType.Option (fsharpOptionRevealWay, v) -> 
                 let isNull =
                     let attr = reader.GetAttribute("nil", W3XMLSchemaInstance)
                     match attr with 
@@ -527,10 +666,16 @@ module internal rec _DeserializePart =
                     tupleTp.ReadValue_InElement(reader)
 
                 | _ ->
-                    let r = x.FsSchemaType.ReadValue(reader)
-                    r
+                    match x.FsSchemaType with 
+                    | FsSchemaType.Ignore ignoreInfo when ignoreInfo.IgnoreInfo_MinOccurs_Zero__OR__DeleteAll -> null
+                    | _ -> 
+                        let r = x.FsSchemaType.ReadValue(reader)
+                        r
 
-            | _ -> failwithf "Not implemented"
+            | _ -> 
+                match x.FsSchemaType with 
+                | FsSchemaType.Ignore ignoreInfo when ignoreInfo.IgnoreInfo_MinOccurs_Zero__OR__DeleteAll -> null
+                | _ -> failwithf "Not implemented"
 
 
 
@@ -559,7 +704,7 @@ module internal rec _DeserializePart =
             FsXmlSerializer_DeserializePart<_>.DeserializeToProp(reader, tp)
 
         member x.Deserialize(reader: ZippedXmlReader): 'T =
-            let tp = typeof<'T>
+            //let tp = typeof<'T>
             //let __CheckTypeValid =
             //    match FSharpType.IsRecord tp with 
             //    | true -> ()
@@ -567,9 +712,10 @@ module internal rec _DeserializePart =
 
 
             let schemaTp = configuration.GetFsXmlSchemaType(tp)
-            match schemaTp.IsRecordEx() with 
-            | true -> advanceReader(reader) |> ignore
-            | false -> ()
+
+            //match schemaTp.IsRecordEx() with 
+            //| true -> advanceReader(reader) |> ignore
+            //| false -> ()
 
             schemaTp.ReadValue(reader)
             |> unbox<'T>
@@ -630,6 +776,9 @@ module internal rec _DeserializePart =
                 let zippedReader = 
                     { RecursiveResolver = configuration.RecursiveResolver() 
                       Reader = reader }
+
+                advanceReader(zippedReader) |> ignore
+
                 x.Deserialize(zippedReader)
                 //let serializer = new XmlSerializer(tp)
                 //let r = serializer.Deserialize(reader);
@@ -637,6 +786,12 @@ module internal rec _DeserializePart =
 
             | Some (defaultObj, method) ->
                 let reader = XmlReader.Create(reader)
+
+                let zippedReader = 
+                    { RecursiveResolver = configuration.RecursiveResolver() 
+                      Reader = reader }
+
+                advanceReader(zippedReader) |> ignore
                 let r = method.Invoke(defaultObj, [|tp; reader; configuration|])
                 r :?> 'T
         

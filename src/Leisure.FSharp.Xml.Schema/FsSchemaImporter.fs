@@ -245,8 +245,7 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
 
 
                             | FsTypeCodeEx.Option (elementTp) ->
-                                loop elementTp
-                                |> FsSchemaType.Option
+                                FsSchemaType.Option(configuration.FSharpOptionRevealWay, loop elementTp)
 
                             | FsTypeCodeEx.DictionaryType dictionaryType ->
                                 let keySchemaType = loop dictionaryType.KeyType
@@ -298,9 +297,17 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
                                                 let element = 
                                                     schemaType.GenerateFsElement(Some prop.Name)
 
+                                                let element = 
+                                                    match schemaType.GetFSharpOptionRevealWay() with 
+                                                    | None -> element
+                                                    | Some revealWay ->
+                                                        { element with FSharpOptionRevealWay = Some revealWay }
+
                                                 (element, schemaType)
                                             )
                                             |> List.unzip
+
+
 
                                         { FsSchemaComplexType_Record.Elements = elements 
                                           ElementSchemaTypes = schemaTypes
@@ -324,16 +331,31 @@ type FsSchemaImporter(configuration: FsXmlSerializerConfiguration) =
                                                 | None -> 
                                                 //match ignoreAttr with 
                                                 //| None -> 
-
                                                     let schemaType = loop propTp
                                                     let element = 
                                                         schemaType.GenerateFsElement(Some prop.Name)
 
+                                                    let element = 
+                                                        match schemaType.GetFSharpOptionRevealWay() with 
+                                                        | None -> element
+                                                        | Some revealWay ->
+                                                            { element with FSharpOptionRevealWay = Some revealWay }
+
                                                     (element, schemaType)
 
-                                                | Some ignoreInfo ->     
+                                                | Some ignoreInfo ->    
+                                                    let ignoreInfo =
+                                                        { ignoreInfo with IgnoreInfoXmlWritingOptions = configuration.IgnoreInfoXmlWritingOptions }
                                                     let schemaType = FsSchemaType.Ignore ignoreInfo
                                                     let element = schemaType.GenerateFsElement(Some prop.Name)
+
+                                                    let element = 
+                                                        match schemaType.GetFSharpOptionRevealWay() with 
+                                                        | None -> element
+                                                        | Some revealWay ->
+                                                            { element with FSharpOptionRevealWay = Some revealWay }
+
+
                                                     element, schemaType
                                             )
                                             |> List.unzip

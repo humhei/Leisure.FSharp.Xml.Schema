@@ -21,7 +21,8 @@ open FsSchemaTypesAST
 module internal rec _SerializePart = 
     type ZippedXmlWriter =
         { Writer: XmlWriter
-          RecursiveResolver: RecursiveResolver}
+          RecursiveResolver: RecursiveResolver
+          }
     with 
         member x.WriteStartElement(localName) = x.Writer.WriteStartElement(localName)
 
@@ -115,7 +116,8 @@ module internal rec _SerializePart =
                 match value with 
                 | :? bool as b -> b.ToString().ToLower()
                 | _ -> value.ToString()
-            writer.WriteValue(value)
+            writer.Writer.WriteRaw(value)
+            //writer.WriteString(value)
 
     type FsSchemaSimpleType with 
         member x.WriteValue(writer: ZippedXmlWriter, value: obj) =
@@ -190,7 +192,18 @@ module internal rec _SerializePart =
                     { Name = Some element.Name.Text
                       FsSchemaType = schemaType }
 
-                propTp.WriteValue(writer, propValue)
+                match schemaType.GetFSharpOptionRevealWay() with 
+                | Some fsharpOptionRevealWay ->
+                    match propValue with 
+                    | null ->
+                        match fsharpOptionRevealWay with 
+                        | FSharpOptionRevealWay.Reveal -> propTp.WriteValue(writer, propValue)
+                        | FSharpOptionRevealWay.AlwaysHideInXml ->
+                            ()
+
+                    | _ -> propTp.WriteValue(writer, propValue)
+                | None ->
+                    propTp.WriteValue(writer, propValue)
             )
 
     type FsSchemaComplexType_SingleCaseUnion with 
@@ -259,10 +272,12 @@ module internal rec _SerializePart =
 
             | UnionTagOptions.SuffixToRootType -> ()
 
+            let uciName = 
+                PropNameOrElementName.FixPropName uci.Name
 
             match fields with 
             | [||] -> 
-                writer.WriteStartElement(uci.Name)
+                writer.WriteStartElement(uciName)
                 writer.WriteFullEndElement()
 
             | [|field|] ->
@@ -272,13 +287,13 @@ module internal rec _SerializePart =
                     | uci -> failwithf "Invalid token, uciSchema %A should be OneFieldCase here" uci
 
                 let schemaType =
-                    { Name = Some uciSchema.UnionCase.Name 
+                    { Name = Some uciName 
                       FsSchemaType = uciSchema.ElementSchemaType }
 
                 schemaType.WriteValue(writer, field)
 
             | fields ->
-                writer.WriteStartElement(uci.Name)
+                writer.WriteStartElement(uciName)
 
                 let uciSchema = 
                     match getUciSchema() with 
@@ -334,12 +349,14 @@ module internal rec _SerializePart =
         member x.WriteValue(writer: ZippedXmlWriter, value: obj) =
             match x with 
             | FsSchemaType.Ignore ignoreInfo ->
-                writer.WriteAttributeString("nil", W3XMLSchemaInstance, "true")
+                match ignoreInfo.IgnoreInfo_MinOccurs_Zero__OR__DeleteAll with 
+                | true -> ()
+                | false -> writer.WriteAttributeString("nil", W3XMLSchemaInstance, "true")
                 //()
 
             | FsSchemaType.SimpleType v -> v.WriteValue(writer, value)
             | FsSchemaType.ComplexType v -> v.WriteValue(writer, value)
-            | FsSchemaType.Option v ->
+            | FsSchemaType.Option (_, v) ->
                 match value with 
                 | null -> 
                     writer.WriteAttributeString("nil", W3XMLSchemaInstance, "true")
@@ -380,9 +397,16 @@ module internal rec _SerializePart =
                         |> PropNameOrElementName.ElementName
                     | Some name -> PropNameOrElementName.PropName name
 
-                writer.WriteStartElement(name.Text)
-                x.FsSchemaType.WriteValue(writer, value)
-                writer.WriteFullEndElement()
+                //writer.WriteStartElement(name.Text)
+                //x.FsSchemaType.WriteValue(writer, value)
+                //writer.WriteFullEndElement()
+
+                match x.FsSchemaType with 
+                | FsSchemaType.Ignore (ignoreInfo) when ignoreInfo.IgnoreInfo_MinOccurs_Zero__OR__DeleteAll -> ()
+                | _ -> 
+                    writer.WriteStartElement(name.Text)
+                    x.FsSchemaType.WriteValue(writer, value)
+                    writer.WriteFullEndElement()
 
 
 
@@ -466,8 +490,13 @@ module internal rec _SerializePart =
                 writer.WriteEndElement()
 
 
-        member private x.File_WriteXml_NamespaceSchemaLocation(xmlPath, xsdPath: string) =
+        member private x.File_WriteXml_NamespaceSchemaLocation(xmlPath, xsdPath: string, ?xsdSubDirLocation: string) =
             let xsdFileName = Path.GetFileName xsdPath
+            let xsdFileName =
+                match xsdSubDirLocation with 
+                | None -> xsdFileName
+                | Some subDir -> subDir.Replace('\\', '/').TrimEnd('/') + "/" + xsdFileName
+
             let lines = 
                 File.ReadAllLines(xmlPath)
                 |> Array.mapi(fun i line ->
@@ -479,6 +508,6 @@ module internal rec _SerializePart =
 
 
 
-        member x.SerializeToFile(xmlPath: string, xsdPath: string, value: 'T) =
+        member x.SerializeToFile(xmlPath: string, xsdPath: string, value: 'T, ?xsdSubDirLocation) =
             x.File_WriteXml(xmlPath, value)
-            x.File_WriteXml_NamespaceSchemaLocation(xmlPath, xsdPath)
+            x.File_WriteXml_NamespaceSchemaLocation(xmlPath, xsdPath, ?xsdSubDirLocation = xsdSubDirLocation)
