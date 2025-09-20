@@ -885,7 +885,7 @@ let MyTests =
       | true -> pass()
       | false -> fail()
 
-    ftestCase "Record with IgnoreAttribute" <| fun _ ->
+    testCase "Record with IgnoreAttribute" <| fun _ ->
       let fileID = 18
       let xmlFile = sprintf @"xml\%d.xml" fileID
       let xsdFile = sprintf @"xml\%d.xsd" fileID
